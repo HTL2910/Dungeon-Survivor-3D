@@ -1,0 +1,8 @@
+{
+  "name": "dungeon-survivor-3d",
+  "version": "2.0.0",
+  "description": "Dungeon Survivor 3D — Modular Full-Stack 60-FPS 3D Action Survivor with Storyline & Active Combo Combat",
+  "scripts": {
+    "start": "node backend/server.js"
+  }
+}
