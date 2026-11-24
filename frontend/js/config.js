@@ -201,8 +201,8 @@
       {
         titleVi: 'III. Giải Mã 5 Cổ Thư Thất Truyền',
         titleEn: 'III. Uncover 5 Ancient Scrolls',
-        bodyVi: 'Rải rác quanh 4 góc sân đá và trung tâm Cổ Thành là 5 cuộn Cổ Thư phát sáng tím. Thu thập chúng để hé lộ sự thật về Đại Chúa Tể Orc, Ngưu Ma Vương, Titan và Thanh Long.',
-        bodyEn: 'Five glowing violet Lore Scrolls rest around the arena corners and altar. Collect them to reveal the truth behind the four Guardians and save the realm.'
+        bodyVi: 'Rải rác khắp 5 khu vực của Cổ Thành mở rộng (Sảnh Ấn Kiếm, Bắc Điện, Nam Mộ, Đông Kho, Tây Tháp) là 5 Cổ Thư tím. Dùng bản đồ nhỏ góc phải để định vị và thu thập chúng!',
+        bodyEn: 'Five glowing violet Lore Scrolls lie scattered across all 5 expanded citadel districts. Follow the tactical minimap in the corner to claim them!'
       }
     ],
     chapters: [
@@ -215,37 +215,45 @@
     ]
   };
 
+  DS.ZONES = {
+    sanctum: { id: 'sanctum', vi: '🏛️ Sảnh Ấn Kiếm', en: '🏛️ Seal Sanctum' },
+    north:   { id: 'north',   vi: '🐉 Bắc Điện Long Mạch', en: '🐉 North Dragon Altar' },
+    south:   { id: 'south',   vi: '💀 Nam Mộ Địa Ngục', en: '💀 South Sunken Crypt' },
+    east:    { id: 'east',    vi: '🪙 Đông Kho Cổ Vật', en: '🪙 East Relic Vault' },
+    west:    { id: 'west',    vi: '🌫️ Tây Tháp Sương Mù', en: '🌫️ West Fog Cloister' }
+  };
+
   DS.SCROLL_DEFS = [
     {
-      id: 'scroll_1', x: -24, z: -24,
+      id: 'scroll_1', x: -66, z: -60,
       titleVi: 'Cổ Thư I: Thệ Ước Lục Kiếm',
       titleEn: 'Scroll I: Pact of Six Blades',
       bodyVi: 'Excalibur, Kusanagi, Thuận Thiên, Masamune, Zulfiqar và Muramasa từng được 6 đại cao thủ cắm xuống đây để khóa chặt Long Mạch.',
       bodyEn: 'Six legendary masters forged a sealing array using Excalibur, Kusanagi, Thuan Thien, Masamune, Zulfiqar, and Muramasa.'
     },
     {
-      id: 'scroll_2', x: 24, z: -24,
+      id: 'scroll_2', x: 66, z: -60,
       titleVi: 'Cổ Thư II: Phản Bội Của Orc Vương',
       titleEn: 'Scroll II: Betrayal of the Orc King',
       bodyVi: 'Vua Orc từng là kẻ bảo vệ cổng Bắc, nhưng bị hơi thở Hư Không tha hóa khi tìm kiếm bí thuật bất tử.',
       bodyEn: 'Once warden of the North Gate, the Orc King fell to void corruption seeking eternal dominion.'
     },
     {
-      id: 'scroll_3', x: -24, z: 24,
+      id: 'scroll_3', x: -62, z: 66,
       titleVi: 'Cổ Thư III: Bí Ẩn Ngọn Đuốc Xanh',
       titleEn: 'Scroll III: Flame of the Cold Torches',
       bodyVi: 'Ánh lửa xanh trên các cột đá Cổ Thành không đốt cháy sinh linh — nó hút Nộ Khí từ mỗi nhát chém để nuôi Thần Kiếm.',
       bodyEn: 'The citadel torches feed upon your Fury strikes, empowering the dormant Six Blades.'
     },
     {
-      id: 'scroll_4', x: 24, z: 24,
+      id: 'scroll_4', x: 62, z: 66,
       titleVi: 'Cổ Thư IV: Lời Sấm Thanh Long',
       titleEn: 'Scroll IV: Prophecy of Azure Lightning',
       bodyVi: 'Chỉ có tia sét xanh thuần khiết mới có thể xuyên thủng vảy Thanh Long — ngọn lửa trần tục sẽ bị nó nuốt chửng.',
       bodyEn: 'Only pure cool-blue lightning pierces the Azure Dragon’s scales cleanly.'
     },
     {
-      id: 'scroll_5', x: 0, z: -30,
+      id: 'scroll_5', x: 0, z: -78,
       titleVi: 'Cổ Thư V: Chìa Khóa Thuận Thiên',
       titleEn: 'Scroll V: Key of Thuan Thien',
       bodyVi: 'Khi 5 Cổ Thư hợp nhất, người gác ấn nhận +15% Sát Thương vĩnh viễn cho lần chiến đấu này. Phong ấn tối hậu đã sẵn sàng!',

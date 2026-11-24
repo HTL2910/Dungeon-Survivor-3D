@@ -51,7 +51,7 @@ html, body {
   font-family: 'BeVietnamPro', system-ui, -apple-system, sans-serif;
 }
 
-canvas {
+canvas:not(#minimap) {
   position: fixed;
   inset: 0;
   width: 100% !important;
@@ -247,6 +247,23 @@ canvas {
 #qBadge {
   cursor: pointer;
   color: var(--cyan);
+}
+
+#zoneBadge {
+  color: var(--gold);
+}
+
+#minimap {
+  position: absolute;
+  top: 96px;
+  right: 14px;
+  width: 108px;
+  height: 108px;
+  border-radius: 10px;
+  border: 1px solid rgba(92, 225, 255, 0.4);
+  background: rgba(8, 12, 24, 0.86);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.65);
+  z-index: 11;
 }
 
 #hudRight {
@@ -1000,13 +1017,24 @@ select.btn {
   }
   #hudMidPills {
     gap: 3px;
+    flex-wrap: wrap;
+    justify-content: center;
   }
   .pillStat {
-    font-size: 10px;
+    font-size: 9.5px;
     padding: 2px 6px;
   }
+  #minimap {
+    top: 94px;
+    right: 8px;
+    width: 72px;
+    height: 72px;
+  }
   #bossBarWrap {
-    top: 124px;
+    top: 112px;
+    left: 8px;
+    transform: none;
+    width: calc(100vw - 96px);
   }
   #timer {
     font-size: 20px;

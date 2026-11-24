@@ -348,10 +348,11 @@
 
   function spawnPack(type, count, ringRadius) {
     const r = ringRadius || 16;
+    const lim = DS.world.ARENA_LIMIT - 2;
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sx = Math.max(-39, Math.min(39, player.x + Math.cos(a) * r));
-      const sz = Math.max(-39, Math.min(39, player.z + Math.sin(a) * r));
+      const sx = Math.max(-lim, Math.min(lim, player.x + Math.cos(a) * r));
+      const sz = Math.max(-lim, Math.min(lim, player.z + Math.sin(a) * r));
       spawnMonster(type, sx, sz, 1);
     }
   }

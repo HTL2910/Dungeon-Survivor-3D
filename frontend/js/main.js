@@ -70,6 +70,7 @@
     triggeredChapters.add(0);
     DS.ui.showStoryBanner(DS.STORY.chapters[0]);
     DS.ui.updateHud(runTime, activeBoss, collectedScrollsRun.size, profile ? profile.quality : 'balanced');
+    DS.ui.drawMinimap(activeBoss);
   }
 
   function startRequested() {
@@ -179,8 +180,9 @@
       if (runTime >= sch.time && !triggeredBosses.has(sch.time)) {
         triggeredBosses.add(sch.time);
         const angle = Math.random() * Math.PI * 2;
-        const bx = Math.max(-36, Math.min(36, DS.entities.player.x + Math.cos(angle) * 16));
-        const bz = Math.max(-36, Math.min(36, DS.entities.player.z + Math.sin(angle) * 16));
+        const blim = DS.world.ARENA_LIMIT - 4;
+        const bx = Math.max(-blim, Math.min(blim, DS.entities.player.x + Math.cos(angle) * 18));
+        const bz = Math.max(-blim, Math.min(blim, DS.entities.player.z + Math.sin(angle) * 18));
         activeBoss = DS.entities.spawnMonster(sch.type, bx, bz, 1);
         DS.ui.showStoryBanner(DS.STORY.chapters[sch.chapterIdx]);
       }
@@ -188,6 +190,7 @@
   }
 
   let lastFrameMs = performance.now();
+  let minimapTick = 0;
   function animate(nowMs) {
     requestAnimationFrame(animate);
     const dt = Math.min(0.05, Math.max(0.001, (nowMs - lastFrameMs) / 1000));
@@ -208,6 +211,7 @@
       }
       DS.vfx.update(dt, nowMs * 0.001, p.x, p.z);
       DS.ui.updateHud(runTime, activeBoss, collectedScrollsRun.size, profile ? profile.quality : 'balanced');
+      if (minimapTick++ % 4 === 0) DS.ui.drawMinimap(activeBoss);
     } else {
       DS.vfx.update(0, nowMs * 0.001, DS.entities.player.x, DS.entities.player.z);
     }
@@ -490,7 +494,9 @@
         hp: DS.entities.player.hp,
         fury: DS.entities.player.fury,
         scrolls: collectedScrollsRun.size,
-        quality: profile ? profile.quality : 'balanced'
+        quality: profile ? profile.quality : 'balanced',
+        arenaLimit: DS.world.ARENA_LIMIT,
+        zone: DS.world.getZoneFor(DS.entities.player.x, DS.entities.player.z).id
       };
     }
   };

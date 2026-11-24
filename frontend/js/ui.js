@@ -355,6 +355,85 @@
     $('overScr').classList.remove('hidden');
   }
 
+  function drawMinimap(activeBoss) {
+    const cvs = $('minimap');
+    if (!cvs) return;
+    const ctx = cvs.getContext('2d');
+    const w = cvs.width;
+    const h = cvs.height;
+    const lim = DS.world.ARENA_LIMIT || 98;
+    const toX = (wx) => ((wx + lim) / (lim * 2)) * (w - 10) + 5;
+    const toY = (wz) => ((wz + lim) / (lim * 2)) * (h - 10) + 5;
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = 'rgba(8, 12, 24, 0.86)';
+    ctx.fillRect(0, 0, w, h);
+
+    // District sector crosshairs & boundary
+    ctx.strokeStyle = 'rgba(118, 175, 255, 0.2)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(4, 4, w - 8, h - 8);
+    ctx.beginPath();
+    ctx.moveTo(w / 2, 4);
+    ctx.lineTo(w / 2, h - 4);
+    ctx.moveTo(4, h / 2);
+    ctx.lineTo(w - 4, h / 2);
+    ctx.stroke();
+
+    // Uncollected Lore Scrolls (Violet)
+    for (const ln of DS.world.loreNodes) {
+      if (ln.collected) continue;
+      ctx.fillStyle = '#d088ff';
+      ctx.beginPath();
+      ctx.arc(toX(ln.x), toY(ln.z), 3.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Alive Treasure Chests (Gold)
+    ctx.fillStyle = '#ffd464';
+    for (const b of DS.world.breakables) {
+      if (b.alive && b.isChest) ctx.fillRect(toX(b.x) - 2, toY(b.z) - 2, 4, 4);
+    }
+
+    // Monsters & Boss
+    for (const m of DS.entities.monsters) {
+      if (!m.alive) continue;
+      const mx = toX(m.x);
+      const my = toY(m.z);
+      if (m.boss) {
+        ctx.fillStyle = '#ff3850';
+        ctx.beginPath();
+        ctx.arc(mx, my, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillStyle = 'rgba(255, 110, 120, 0.85)';
+        ctx.fillRect(mx - 1.2, my - 1.2, 2.4, 2.4);
+      }
+    }
+
+    // Player Marker
+    const p = DS.entities.player;
+    const px = toX(p.x);
+    const py = toY(p.z);
+    ctx.fillStyle = '#5ce1ff';
+    ctx.beginPath();
+    ctx.arc(px, py, 3.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + Math.sin(p.aimYaw) * 6.5, py + Math.cos(p.aimYaw) * 6.5);
+    ctx.stroke();
+
+    // District badge sync
+    const zb = $('zoneBadge');
+    if (zb && DS.world.getZoneFor) {
+      const z = DS.world.getZoneFor(p.x, p.z);
+      zb.textContent = txt(z.vi, z.en);
+    }
+  }
+
   DS.ui = {
     $,
     getLang: () => lang,
@@ -366,6 +445,7 @@
     renderCodex,
     renderDraft,
     updateHud,
+    drawMinimap,
     showStoryBanner,
     showLoreToast,
     showGameOver

@@ -157,7 +157,13 @@
   const arenaGroup = new THREE.Group();
   const breakables = [];
   const loreNodes = [];
-  const ARENA_LIMIT = 40;
+  const ARENA_LIMIT = 98;
+
+  function getZoneFor(x, z) {
+    if (Math.abs(x) <= 36 && Math.abs(z) <= 36) return DS.ZONES.sanctum;
+    if (Math.abs(z) >= Math.abs(x)) return z < 0 ? DS.ZONES.north : DS.ZONES.south;
+    return x > 0 ? DS.ZONES.east : DS.ZONES.west;
+  }
 
   function buildArena() {
     const scene = DS.vfx.scene;
@@ -165,91 +171,158 @@
     breakables.length = 0;
     loreNodes.length = 0;
 
-    // Cobblestone Floor
+    const staticGroup = new THREE.Group();
+
+    // Expanded 224x224 Citadel Cobblestone Floor
     const texLoader = new THREE.TextureLoader();
     const floorTex = texLoader.load('assets/textures/cobblestone_floor_03_diff_1k.jpg');
     floorTex.wrapS = THREE.RepeatWrapping;
     floorTex.wrapT = THREE.RepeatWrapping;
-    floorTex.repeat.set(18, 18);
+    floorTex.repeat.set(42, 42);
     floorTex.colorSpace = THREE.SRGBColorSpace;
 
     const floorMesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(96, 96),
+      new THREE.PlaneGeometry(224, 224),
       new THREE.MeshLambertMaterial({ map: floorTex, color: 0xb8c0d4 })
     );
     floorMesh.rotation.x = -Math.PI / 2;
-    arenaGroup.add(floorMesh);
+    staticGroup.add(floorMesh);
 
-    // Subtle Center Seal Circle on Ground
+    // Center Sanctum Seal Ring & Outer District Rings
     const sealDisc = new THREE.Mesh(
       new THREE.RingGeometry(4.2, 4.6, 36),
       new THREE.MeshBasicMaterial({ color: 0x3f88ff, transparent: true, opacity: 0.45, side: THREE.DoubleSide })
     );
     sealDisc.rotation.x = -Math.PI / 2;
     sealDisc.position.y = 0.025;
-    arenaGroup.add(sealDisc);
+    staticGroup.add(sealDisc);
 
-    // Perimeter Walls around +/-43
+    // North Dragon Altar Seal Ring
+    const dragonAltarRing = new THREE.Mesh(
+      new THREE.RingGeometry(5.5, 6.2, 32),
+      new THREE.MeshBasicMaterial({ color: 0x5ce1ff, transparent: true, opacity: 0.52, side: THREE.DoubleSide })
+    );
+    dragonAltarRing.rotation.x = -Math.PI / 2;
+    dragonAltarRing.position.set(0, 0.03, -76);
+    staticGroup.add(dragonAltarRing);
+
+    // Perimeter Fortress Walls around +/-102 (4 Monumental Gates + Wall Segments)
     const wallPositions = [];
-    for (let i = -36; i <= 36; i += 12) {
-      wallPositions.push({ x: i, z: -43, ry: 0, door: i === 0 });
-      wallPositions.push({ x: i, z: 43, ry: Math.PI, door: i === 0 });
-      wallPositions.push({ x: -43, z: i, ry: Math.PI / 2, door: false });
-      wallPositions.push({ x: 43, z: i, ry: -Math.PI / 2, door: false });
+    for (let i = -96; i <= 96; i += 16) {
+      wallPositions.push({ x: i, z: -102, ry: 0, door: i === 0 });
+      wallPositions.push({ x: i, z: 102, ry: Math.PI, door: i === 0 });
+      wallPositions.push({ x: -102, z: i, ry: Math.PI / 2, door: i === 0 });
+      wallPositions.push({ x: 102, z: i, ry: -Math.PI / 2, door: i === 0 });
     }
     for (const w of wallPositions) {
-      const m = spawnModel('dungeon', w.door ? 'wallDoor' : 'wall', w.door ? 6.5 : 5.2, true);
+      const m = spawnModel('dungeon', w.door ? 'wallDoor' : 'wall', w.door ? 7.2 : 5.6, true);
       m.group.position.set(w.x, 0, w.z);
       m.group.rotation.y = w.ry;
-      m.group.scale.set(2.1, 1.4, 1.4);
-      arenaGroup.add(m.group);
+      m.group.scale.set(2.6, 1.55, 1.5);
+      staticGroup.add(m.group);
     }
 
-    // 8 Pillars + Torches (additive flame sprites & floor glow discs — ZERO PointLights)
-    const pillarRing = [
+    // 20 Pillars + Torches spanning Center Sanctum & All 4 Outer Districts (ZERO PointLights)
+    const pillarCoords = [
       [15, 15], [-15, 15], [15, -15], [-15, -15],
-      [0, 26], [0, -26], [26, 0], [-26, 0]
+      [0, 28], [0, -28], [28, 0], [-28, 0],
+      // North Dragon Altar
+      [-14, -68], [14, -68], [-14, -84], [14, -84],
+      // South Sunken Crypt
+      [-24, 58], [24, 58], [-48, 76], [48, 76],
+      // East Relic Vault
+      [58, -24], [58, 24],
+      // West Fog Cloister
+      [-64, -14], [-64, 14]
     ];
-    for (const [px, pz] of pillarRing) {
-      const p = spawnModel('dungeon', 'pillar', 4.6, false);
+    for (const [px, pz] of pillarCoords) {
+      const p = spawnModel('dungeon', 'pillar', 4.8, false);
       p.group.position.set(px, 0, pz);
-      arenaGroup.add(p.group);
+      staticGroup.add(p.group);
 
       const t = spawnModel('dungeon', 'torch', 1.6, false);
-      t.group.position.set(px, 2.35, pz + 0.72);
-      arenaGroup.add(t.group);
-      DS.vfx.addTorchEffect(px, 3.8, pz + 0.72);
+      t.group.position.set(px, 2.4, pz + 0.72);
+      staticGroup.add(t.group);
+      DS.vfx.addTorchEffect(px, 3.85, pz + 0.72);
     }
 
-    // Decorative stairs & pathways near center cardinal axes
-    for (const [sx, sz, ry] of [[0, -10, 0], [0, 10, Math.PI], [-10, 0, Math.PI / 2], [10, 0, -Math.PI / 2]]) {
-      const p = spawnModel('dungeon', 'path', 0.45, true);
-      p.group.position.set(sx, 0.02, sz);
-      p.group.rotation.y = ry;
-      p.group.scale.set(3.2, 0.5, 3.2);
-      arenaGroup.add(p.group);
+    // Cardinal Cobblestone Causeways stretching across N/S/E/W wings
+    for (const dist of [14, 32, 50, 68, 84]) {
+      for (const [sx, sz, ry] of [
+        [0, -dist, 0],
+        [0, dist, Math.PI],
+        [-dist, 0, Math.PI / 2],
+        [dist, 0, -Math.PI / 2]
+      ]) {
+        const p = spawnModel('dungeon', 'path', 0.45, true);
+        p.group.position.set(sx, 0.02, sz);
+        p.group.rotation.y = ry;
+        p.group.scale.set(3.4, 0.5, 3.4);
+        staticGroup.add(p.group);
+      }
     }
-    const stairsObj = spawnModel('dungeon', 'stairs', 2.4, true);
-    stairsObj.group.position.set(0, 0, -39.5);
-    stairsObj.group.scale.set(2.4, 2.0, 2.0);
-    arenaGroup.add(stairsObj.group);
 
-    // Rock clusters on outer rim
-    for (const [rx, rz] of [[-33, -33], [33, -33], [-33, 33], [33, 33]]) {
-      const rk = spawnModel('dungeon', 'rock', 2.5, true);
+    // North Altar Grand Stairs + Ruin Walls in South Crypt / East Vault / West Cloister
+    const stairsObj = spawnModel('dungeon', 'stairs', 2.8, true);
+    stairsObj.group.position.set(0, 0, -95);
+    stairsObj.group.scale.set(2.8, 2.2, 2.2);
+    staticGroup.add(stairsObj.group);
+
+    const interiorRuins = [
+      // South Sunken Crypt barricades
+      [-18, 62, 0.25], [18, 62, -0.25], [0, 82, 0],
+      // East Relic Vault courtyard dividers
+      [68, -22, Math.PI / 2], [68, 22, Math.PI / 2],
+      // West Fog Cloister wings
+      [-78, 0, Math.PI / 2]
+    ];
+    for (const [rx, rz, rry] of interiorRuins) {
+      const rw = spawnModel('dungeon', 'wall', 3.4, true);
+      rw.group.position.set(rx, 0, rz);
+      rw.group.rotation.y = rry;
+      rw.group.scale.set(1.4, 1.0, 1.1);
+      staticGroup.add(rw.group);
+    }
+
+    // Rock clusters across all 5 districts
+    for (const [rx, rz] of [
+      [-34, -34], [34, -34], [-34, 34], [34, 34],
+      [-76, -72], [76, -72], [-76, 72], [76, 72],
+      [-52, 66], [52, 66], [-82, -28], [84, 34]
+    ]) {
+      const rk = spawnModel('dungeon', 'rock', 2.6, true);
       rk.group.position.set(rx, 0, rz);
-      arenaGroup.add(rk.group);
+      staticGroup.add(rk.group);
     }
 
-    // Breakable Barrels, Crates & Treasure Chests
+    // Freeze static world matrices once for 60-FPS CPU efficiency
+    staticGroup.traverse((o) => {
+      o.matrixAutoUpdate = false;
+      o.updateMatrix();
+    });
+    arenaGroup.add(staticGroup);
+
+    // Expanded Breakable Barrels, Crates & 10 Treasure Chests
     const propCoords = [
+      // Center Sanctum
       [-9, -9, 'barrel'], [9, -9, 'crate'], [-9, 9, 'crate'], [9, 9, 'barrel'],
       [-20, 6, 'barrel'], [20, 6, 'crate'], [-20, -6, 'crate'], [20, -6, 'barrel'],
-      [7, -21, 'barrel'], [-7, 21, 'crate'], [-31, 0, 'chest'], [31, 0, 'chest'],
-      [0, 31, 'chest'], [-18, -30, 'barrel'], [18, 30, 'crate'], [29, -15, 'barrel']
+      [34, 0, 'chest'], [-34, 0, 'barrel'],
+      // North Dragon Altar
+      [-10, -78, 'chest'], [10, -78, 'chest'], [-8, -64, 'barrel'], [8, -64, 'crate'],
+      [-26, -74, 'barrel'], [26, -74, 'crate'], [0, -86, 'barrel'],
+      // East Relic Vault
+      [72, 0, 'chest'], [66, 14, 'chest'], [74, -16, 'chest'],
+      [54, -8, 'barrel'], [54, 8, 'crate'], [82, -10, 'barrel'], [82, 10, 'crate'], [72, 32, 'barrel'],
+      // South Sunken Crypt
+      [0, 74, 'chest'], [-32, 72, 'chest'], [32, 72, 'chest'],
+      [-12, 54, 'barrel'], [12, 54, 'crate'], [-28, 84, 'crate'], [28, 84, 'barrel'],
+      // West Fog Cloister
+      [-64, 0, 'chest'], [-78, 18, 'chest'],
+      [-54, -12, 'barrel'], [-54, 12, 'crate'], [-72, -18, 'barrel'], [-72, 18, 'crate'], [-86, 12, 'barrel']
     ];
     for (const [bx, bz, kind] of propCoords) {
-      const obj = spawnModel('dungeon', kind, kind === 'chest' ? 1.5 : 1.35, true);
+      const obj = spawnModel('dungeon', kind, kind === 'chest' ? 1.55 : 1.35, true);
       obj.group.position.set(bx, 0, bz);
       arenaGroup.add(obj.group);
       breakables.push({
@@ -331,6 +404,7 @@
     templates,
     breakables,
     loreNodes,
+    getZoneFor,
     loadAllAssets,
     spawnModel,
     buildArena,

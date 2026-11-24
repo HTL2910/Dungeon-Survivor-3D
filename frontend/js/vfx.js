@@ -16,9 +16,9 @@
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x090b14);
-  scene.fog = new THREE.FogExp2(0x090b14, 0.014);
+  scene.fog = new THREE.FogExp2(0x090b14, 0.0105);
 
-  const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.5, 160);
+  const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.5, 220);
   camera.position.set(0, 21, 18);
 
   // Strictly 3 scene lights total (zero shadow maps, zero PointLights, zero scene.environment)
