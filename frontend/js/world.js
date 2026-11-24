@@ -157,7 +157,37 @@
   const arenaGroup = new THREE.Group();
   const breakables = [];
   const loreNodes = [];
+  const shrines = [];
   const ARENA_LIMIT = 98;
+
+  // Shared Shrine Geometries & Materials (zero per-instance cloning, zero PointLights)
+  const SHRINE_STONE_MAT = new THREE.MeshLambertMaterial({ color: 0x3b445e });
+  const SHRINE_CAP_MAT = new THREE.MeshLambertMaterial({ color: 0x556488 });
+  const SHRINE_ORB_MATS = {
+    gold: new THREE.MeshBasicMaterial({ color: 0xffd464 }),
+    cyan: new THREE.MeshBasicMaterial({ color: 0x5ce1ff })
+  };
+  const SHRINE_RING_MATS = {
+    gold: new THREE.MeshBasicMaterial({ color: 0xffd464, transparent: true, opacity: 0.58, depthWrite: false, side: THREE.DoubleSide }),
+    cyan: new THREE.MeshBasicMaterial({ color: 0x5ce1ff, transparent: true, opacity: 0.58, depthWrite: false, side: THREE.DoubleSide })
+  };
+  const SHRINE_CHARGE_MATS = {
+    gold: new THREE.MeshBasicMaterial({ color: 0xffd464, transparent: true, opacity: 0.24, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }),
+    cyan: new THREE.MeshBasicMaterial({ color: 0x5ce1ff, transparent: true, opacity: 0.24, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })
+  };
+  const SHRINE_GLOW_MATS = {
+    gold: new THREE.MeshBasicMaterial({ map: DS.vfx.TEX.glow, color: 0xffd464, transparent: true, opacity: 0.38, depthWrite: false, blending: THREE.AdditiveBlending }),
+    cyan: new THREE.MeshBasicMaterial({ map: DS.vfx.TEX.glow, color: 0x5ce1ff, transparent: true, opacity: 0.38, depthWrite: false, blending: THREE.AdditiveBlending })
+  };
+  const shrinePedGeo = new THREE.CylinderGeometry(0.95, 1.25, 0.72, 8);
+  const shrineCapGeo = new THREE.CylinderGeometry(0.75, 0.92, 0.24, 8);
+  const shrineOrbGeo = new THREE.OctahedronGeometry(0.6, 0);
+  const shrineRingGeo = new THREE.RingGeometry(3.65, 3.85, 48);
+  shrineRingGeo.rotateX(-Math.PI / 2);
+  const shrineChargeGeo = new THREE.CircleGeometry(3.68, 40);
+  shrineChargeGeo.rotateX(-Math.PI / 2);
+  const shrineGlowGeo = new THREE.PlaneGeometry(8.2, 8.2);
+  shrineGlowGeo.rotateX(-Math.PI / 2);
 
   function getZoneFor(x, z) {
     if (Math.abs(x) <= 36 && Math.abs(z) <= 36) return DS.ZONES.sanctum;
@@ -170,6 +200,7 @@
     while (arenaGroup.children.length) arenaGroup.remove(arenaGroup.children[0]);
     breakables.length = 0;
     loreNodes.length = 0;
+    shrines.length = 0;
 
     const staticGroup = new THREE.Group();
 
@@ -318,7 +349,7 @@
       [0, 74, 'chest'], [-32, 72, 'chest'], [32, 72, 'chest'],
       [-12, 54, 'barrel'], [12, 54, 'crate'], [-28, 84, 'crate'], [28, 84, 'barrel'],
       // West Fog Cloister
-      [-64, 0, 'chest'], [-78, 18, 'chest'],
+      [-74, 0, 'chest'], [-78, 18, 'chest'],
       [-54, -12, 'barrel'], [-54, 12, 'crate'], [-72, -18, 'barrel'], [-72, 18, 'crate'], [-86, 12, 'barrel']
     ];
     for (const [bx, bz, kind] of propCoords) {
@@ -340,7 +371,59 @@
     }
 
     buildLoreScrolls();
+    buildShrines();
     scene.add(arenaGroup);
+  }
+
+  function buildShrines() {
+    for (const sDef of DS.SHRINE_DEFS) {
+      const tone = sDef.color === 0xffd464 ? 'gold' : 'cyan';
+      const wrap = new THREE.Group();
+      wrap.position.set(sDef.x, 0, sDef.z);
+
+      const ped = new THREE.Mesh(shrinePedGeo, SHRINE_STONE_MAT);
+      ped.position.y = 0.36;
+      wrap.add(ped);
+
+      const cap = new THREE.Mesh(shrineCapGeo, SHRINE_CAP_MAT);
+      cap.position.y = 0.84;
+      wrap.add(cap);
+
+      const orb = new THREE.Mesh(shrineOrbGeo, SHRINE_ORB_MATS[tone]);
+      orb.position.y = 1.72;
+      wrap.add(orb);
+
+      const glowDisc = new THREE.Mesh(shrineGlowGeo, SHRINE_GLOW_MATS[tone]);
+      glowDisc.position.y = 0.032;
+      wrap.add(glowDisc);
+
+      const outerRing = new THREE.Mesh(shrineRingGeo, SHRINE_RING_MATS[tone]);
+      outerRing.position.y = 0.04;
+      wrap.add(outerRing);
+
+      const chargeDisc = new THREE.Mesh(shrineChargeGeo, SHRINE_CHARGE_MATS[tone]);
+      chargeDisc.position.y = 0.046;
+      chargeDisc.scale.set(0.05, 1, 0.05);
+      chargeDisc.visible = false;
+      wrap.add(chargeDisc);
+
+      arenaGroup.add(wrap);
+      shrines.push({
+        def: sDef,
+        x: sDef.x,
+        z: sDef.z,
+        radius: 3.8,
+        chargeDur: 2.2,
+        charge: 0,
+        ready: true,
+        respawnT: 0,
+        group: wrap,
+        orb,
+        outerRing,
+        chargeDisc,
+        glowDisc
+      });
+    }
   }
 
   function buildLoreScrolls() {
@@ -396,6 +479,16 @@
       ln.group.visible = true;
       ln.orb.material.color.set(known.has(ln.def.id) ? 0x5ce1ff : 0xd088ff);
     }
+    for (const sh of shrines) {
+      sh.ready = true;
+      sh.charge = 0;
+      sh.respawnT = 0;
+      sh.orb.visible = true;
+      sh.outerRing.visible = true;
+      sh.glowDisc.visible = true;
+      sh.chargeDisc.visible = false;
+      sh.chargeDisc.scale.set(0.05, 1, 0.05);
+    }
   }
 
   DS.world = {
@@ -404,6 +497,7 @@
     templates,
     breakables,
     loreNodes,
+    shrines,
     getZoneFor,
     loadAllAssets,
     spawnModel,

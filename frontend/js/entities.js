@@ -18,6 +18,8 @@
     z: 0,
     yaw: 0,
     aimYaw: 0,
+    aimX: 0,
+    aimZ: 7,
     hasMouseAim: false,
     heroId: 'knight',
     hp: 130,
@@ -36,6 +38,10 @@
     kills: 0,
     goldEarned: 0,
     scrollBonusMight: 0,
+    streak: 0,
+    streakT: 0,
+    shrineBuff: null,
+    shrineCharging: null,
     // Active Combat
     comboStep: 0,
     comboResetT: 0,
@@ -145,6 +151,9 @@
     player.z = 0;
     player.yaw = 0;
     player.aimYaw = 0;
+    player.aimX = 0;
+    player.aimZ = 7;
+    player.hasMouseAim = false;
     player.maxHp = Math.round(h.hp + (ml.hp || 0) * 25);
     player.hp = player.maxHp;
     player.speed = h.speed * (1 + (ml.speed || 0) * 0.06);
@@ -161,6 +170,10 @@
     player.kills = 0;
     player.goldEarned = 0;
     player.scrollBonusMight = 0;
+    player.streak = 0;
+    player.streakT = 0;
+    player.shrineBuff = null;
+    player.shrineCharging = null;
 
     player.comboStep = 0;
     player.comboResetT = 0;
@@ -233,15 +246,21 @@
     }
   }
 
+  function addFury(amount) {
+    const mult = player.streak >= 10 ? 1.2 : 1.0;
+    player.fury = Math.min(100, player.fury + amount * mult);
+  }
+
   function effectiveStats() {
     const berserk = player.berserkT > 0 ? 1 : 0;
+    const sb = player.shrineBuff && player.shrineBuff.timer > 0 ? player.shrineBuff.type : null;
     const might =
       player.might *
-      (1 + (passives.p_might || 0) * 0.18 + player.scrollBonusMight + berserk * 0.5);
-    const area = player.area * (1 + (passives.p_area || 0) * 0.18 + berserk * 0.25);
+      (1 + (passives.p_might || 0) * 0.18 + player.scrollBonusMight + berserk * 0.5 + (sb === 'might' ? 0.3 : 0));
+    const area = player.area * (1 + (passives.p_area || 0) * 0.18 + berserk * 0.25 + (sb === 'area' ? 0.35 : 0));
     const cd = Math.max(0.35, player.cdMult * (1 - (passives.p_cd || 0) * 0.12) * (berserk ? 0.65 : 1));
-    const speed = player.speed * (1 + (passives.p_spd || 0) * 0.12 + berserk * 0.4);
-    const pickup = player.pickupR * (1 + (passives.p_magnet || 0) * 0.3);
+    const speed = player.speed * (1 + (passives.p_spd || 0) * 0.12 + berserk * 0.4 + (sb === 'speed' ? 0.25 : 0));
+    const pickup = player.pickupR * (1 + (passives.p_magnet || 0) * 0.3 + (sb === 'magnet' ? 1.0 : 0));
     const armor = player.armor + (passives.p_armor || 0) * 2;
     const greed = player.greed * (1 + (passives.p_greed || 0) * 0.25);
     return { might, area, cd, speed, pickup, armor, greed };
@@ -274,7 +293,9 @@
     if (m.hp <= 0) {
       m.alive = false;
       player.kills++;
-      player.fury = Math.min(100, player.fury + (m.boss ? 45 : 3.5));
+      player.streak++;
+      player.streakT = 3.5;
+      addFury(m.boss ? 45 : 3.5);
       spawnPickup(m.x, m.z, m.boss ? 'chest' : 'xp', m.xp);
       if (Math.random() < 0.22 || m.boss) spawnPickup(m.x + 0.5, m.z - 0.4, 'gold', m.gold);
       if (Math.random() < 0.015) spawnPickup(m.x - 0.4, m.z + 0.4, 'heal', 25);
@@ -338,6 +359,13 @@
       slowT: 0,
       flashT: 0,
       animAcc: 0,
+      skillCd: st.boss ? 4.6 : 0,
+      bossCastT: 0,
+      chargeWindupT: 0,
+      chargeMoveT: 0,
+      chargeDirX: 0,
+      chargeDirZ: 0,
+      chargeSpeed: 0,
       alive: true,
       group: mObj.group,
       mixer
@@ -378,39 +406,7 @@
   }
 
   // ==================== ACTIVE PLAYER COMBAT ====================
-  function triggerPlayerCombo() {
-    if (player.atkCd > 0) return false;
-    const st = effectiveStats();
-    player.comboStep = player.comboResetT > 0 ? (player.comboStep % 3) + 1 : 1;
-    player.comboResetT = 0.9;
-    player.atkCd = 0.23 * Math.min(1, st.cd);
-    player.swingAnimT = 0.24;
-
-    const dirYaw = player.aimYaw;
-    const fx = Math.sin(dirYaw);
-    const fz = Math.cos(dirYaw);
-    const isFinisher = player.comboStep === 3;
-    const reach = (isFinisher ? 5.2 : player.comboStep === 2 ? 4.3 : 3.9) * st.area;
-    const dmg = 34 * st.might * (isFinisher ? 2.0 : player.comboStep === 2 ? 1.25 : 1.0);
-    const color = isFinisher ? 0xff7744 : player.comboStep === 2 ? 0x66ddff : 0xffe484;
-
-    DS.audio.playSwordSlash(player.comboStep);
-    DS.vfx.spawnSlashArc(
-      player.x + fx * 1.1,
-      player.z + fz * 1.1,
-      dirYaw + (player.comboStep === 2 ? Math.PI * 0.45 : -Math.PI * 0.35),
-      color,
-      reach * 0.72,
-      isFinisher ? 0.26 : 0.19,
-      player.comboStep === 2 ? -5.5 : 5.5
-    );
-    DS.vfx.spawnFloorGlow(player.x + fx * 1.6, player.z + fz * 1.6, color, reach * 0.65, 0.22, 0.6);
-    if (isFinisher) {
-      DS.vfx.spawnRing(player.x + fx * 1.5, player.z + fz * 1.5, 0xff9944, reach * 0.8, 0.28, false);
-      DS.vfx.addShake(0.26);
-    }
-
-    // Hit monsters in cone / radius
+  function meleeSweep(reach, dmg, isFinisher, dotMin, knockForce, fx, fz) {
     const hitList = monsters.slice();
     let hits = 0;
     for (const m of hitList) {
@@ -418,17 +414,14 @@
       const dz = m.z - player.z;
       const dist = Math.hypot(dx, dz);
       if (dist > reach + m.radius) continue;
-      if (!isFinisher && dist > 1.3) {
+      if (dotMin > -1 && dist > 1.3) {
         const dot = (dx * fx + dz * fz) / dist;
-        if (dot < 0.05) continue; // front hemisphere cleave
+        if (dot < dotMin) continue;
       }
       hits++;
       const d = Math.max(0.1, dist);
-      damageMonster(m, dmg, isFinisher, (dx / d) * (isFinisher ? 2.4 : 1.1), (dz / d) * (isFinisher ? 2.4 : 1.1));
+      damageMonster(m, dmg, isFinisher, (dx / d) * knockForce, (dz / d) * knockForce);
     }
-    player.fury = Math.min(100, player.fury + (hits > 0 ? (isFinisher ? 14 : 7) : 2));
-
-    // Break crates & barrels
     for (const b of DS.world.breakables) {
       if (!b.alive) continue;
       if (Math.hypot(b.x - player.x, b.z - player.z) <= reach + 0.8) {
@@ -436,6 +429,281 @@
         if (b.hp <= 0) smashBreakable(b);
       }
     }
+    return hits;
+  }
+
+  function clampArena(v, pad) {
+    const lim = (DS.world.ARENA_LIMIT || 98) - (pad || 1.5);
+    return Math.max(-lim, Math.min(lim, v));
+  }
+
+  function triggerPlayerCombo() {
+    if (player.atkCd > 0) return false;
+    const st = effectiveStats();
+    const hId = player.heroId;
+    player.comboStep = player.comboResetT > 0 ? (player.comboStep % 3) + 1 : 1;
+    player.comboResetT = 0.95;
+    player.swingAnimT = 0.24;
+
+    const step = player.comboStep;
+    const isFinisher = step === 3;
+    const dirYaw = player.aimYaw;
+    const fx = Math.sin(dirYaw);
+    const fz = Math.cos(dirYaw);
+    const stepScale = isFinisher ? 2.0 : step === 2 ? 1.25 : 1.0;
+    const baseDmg = 34 * st.might * stepScale;
+
+    if (hId === 'wizard') {
+      player.atkCd = 0.24 * Math.min(1, st.cd);
+      DS.audio.playSkillSfx('lightning');
+      DS.vfx.spawnSlashArc(
+        player.x + fx * 1.1,
+        player.z + fz * 1.1,
+        dirYaw + (step === 2 ? 0.35 : -0.35),
+        isFinisher ? 0xffffff : 0x66ccff,
+        2.3 * st.area,
+        0.19,
+        step === 2 ? -5.0 : 5.0
+      );
+      DS.vfx.spawnFloorGlow(player.x + fx * 1.5, player.z + fz * 1.5, 0x3399ff, 2.6 * st.area, 0.22, 0.68);
+
+      const offsets = step === 2 ? [-0.11, 0.11] : [0];
+      const boltDmg = baseDmg * (step === 2 ? 0.82 : isFinisher ? 1.05 : 1.0);
+      for (const off of offsets) {
+        const a = dirYaw + off;
+        spawnProjectile(
+          player.x + Math.sin(a) * 0.9,
+          player.z + Math.cos(a) * 0.9,
+          Math.sin(a) * (isFinisher ? 26 : 23),
+          Math.cos(a) * (isFinisher ? 26 : 23),
+          isFinisher ? 0xffffff : 0x66ccff,
+          boltDmg,
+          isFinisher ? 1.4 : 1.15,
+          'arcane',
+          { pierce: isFinisher ? 6 : 4, life: 1.1, crit: isFinisher, fromCombo: true, shape: 'arcane' }
+        );
+      }
+
+      if (isFinisher) {
+        let aimDist = 6.8 * st.area;
+        if (player.hasMouseAim) {
+          const md = Math.hypot(player.aimX - player.x, player.aimZ - player.z);
+          aimDist = Math.max(3.0, Math.min(11.5 * st.area, md));
+        }
+        const tx = clampArena(player.x + fx * aimDist, 1.0);
+        const tz = clampArena(player.z + fz * aimDist, 1.0);
+        const strikeRad = 3.2 * st.area;
+        DS.vfx.spawnLightning(tx, 14, tz, tx, 0.35, tz);
+        DS.vfx.spawnDecal(tx, tz, 'elec', 2.7 * st.area, 2.3);
+        DS.vfx.spawnRing(tx, tz, 0x66ccff, strikeRad, 0.28, false);
+        DS.vfx.addShake(0.24);
+        let strikeHits = 0;
+        for (const m of monsters.slice()) {
+          if (Math.hypot(m.x - tx, m.z - tz) <= strikeRad + m.radius) {
+            strikeHits++;
+            damageMonster(m, baseDmg * 1.15, true, 0, 0);
+          }
+        }
+        for (const b of DS.world.breakables) {
+          if (b.alive && Math.hypot(b.x - tx, b.z - tz) <= strikeRad + 0.8) {
+            b.hp -= baseDmg;
+            if (b.hp <= 0) smashBreakable(b);
+          }
+        }
+        addFury(strikeHits > 0 ? 12 : 5);
+      } else {
+        addFury(4);
+      }
+      return true;
+    }
+
+    if (hId === 'archer') {
+      player.atkCd = 0.21 * Math.min(1, st.cd);
+      DS.audio.playSkillSfx('arrow');
+      DS.vfx.spawnSlashArc(
+        player.x + fx * 1.0,
+        player.z + fz * 1.0,
+        dirYaw + (step === 2 ? 0.3 : -0.3),
+        isFinisher ? 0x5ce1ff : 0x99ff88,
+        2.1 * st.area,
+        0.16,
+        step === 2 ? -4.5 : 4.5
+      );
+      DS.vfx.spawnFloorGlow(player.x + fx * 1.3, player.z + fz * 1.3, isFinisher ? 0x5ce1ff : 0x88ee66, 2.2 * st.area, 0.18, 0.55);
+
+      const fan = isFinisher ? [-0.36, -0.18, 0, 0.18, 0.36] : step === 2 ? [-0.2, 0, 0.2] : [-0.14, 0, 0.14];
+      const arrowSpd = isFinisher ? 28 : step === 2 ? 25 : 23;
+      const arrowDmg = baseDmg * (isFinisher ? 0.82 : 0.62);
+      for (const off of fan) {
+        const a = dirYaw + off;
+        spawnProjectile(
+          player.x + Math.sin(a) * 0.8,
+          player.z + Math.cos(a) * 0.8,
+          Math.sin(a) * arrowSpd,
+          Math.cos(a) * arrowSpd,
+          isFinisher ? 0x5ce1ff : step === 2 ? 0x66ffaa : 0xaaff77,
+          arrowDmg,
+          isFinisher ? 1.15 : 0.95,
+          'arrow',
+          { pierce: isFinisher ? 6 : 2, life: 1.05, crit: isFinisher, fromCombo: true, shape: 'arrow' }
+        );
+      }
+      if (isFinisher) {
+        DS.vfx.spawnRing(player.x + fx * 1.3, player.z + fz * 1.3, 0x5ce1ff, 2.8 * st.area, 0.24, false);
+        DS.vfx.addShake(0.2);
+      }
+      addFury(isFinisher ? 7 : 4);
+      return true;
+    }
+
+    if (hId === 'pirate') {
+      player.atkCd = 0.23 * Math.min(1, st.cd);
+      const reach = (isFinisher ? 5.2 : step === 2 ? 4.4 : 4.0) * st.area;
+      DS.audio.playSwordSlash(step);
+      if (isFinisher) DS.audio.playSkillSfx('fire');
+      DS.vfx.spawnSlashArc(
+        player.x + fx * 1.1,
+        player.z + fz * 1.1,
+        dirYaw + (step === 2 ? Math.PI * 0.45 : -Math.PI * 0.35),
+        isFinisher ? 0xff4411 : 0xffaa33,
+        reach * 0.76,
+        isFinisher ? 0.26 : 0.19,
+        step === 2 ? -5.5 : 5.5
+      );
+      DS.vfx.spawnFloorGlow(player.x + fx * 2.0, player.z + fz * 2.0, 0xff5511, reach * 0.78, 0.26, 0.72);
+      const coneCount = isFinisher ? 14 : 9;
+      for (let k = 0; k < coneCount; k++) {
+        const ca = dirYaw + (Math.random() - 0.5) * 0.85;
+        const spd = 7 + Math.random() * 8;
+        DS.vfx.fireBatch.spawn(
+          player.x + fx * 1.2,
+          0.95,
+          player.z + fz * 1.2,
+          Math.sin(ca) * spd,
+          1.2 + Math.random() * 2.5,
+          Math.cos(ca) * spd,
+          k % 2 === 0 ? 0xffaa33 : 0xff4411,
+          isFinisher ? 0.85 : 0.65,
+          0.32
+        );
+      }
+
+      let hits = meleeSweep(reach, baseDmg * 0.85, isFinisher, isFinisher ? -1 : 0.05, isFinisher ? 2.4 : 1.2, fx, fz);
+      // Explosive hellfire cone bonus damage
+      const coneReach = reach * 1.3;
+      for (const m of monsters.slice()) {
+        const dx = m.x - player.x;
+        const dz = m.z - player.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > coneReach + m.radius || dist < 0.1) continue;
+        if ((dx * fx + dz * fz) / dist < 0.42) continue;
+        hits++;
+        damageMonster(m, baseDmg * 0.55, isFinisher, (dx / dist) * 1.6, (dz / dist) * 1.6);
+      }
+
+      if (isFinisher) {
+        const bx = clampArena(player.x + fx * 2.1, 1.0);
+        const bz = clampArena(player.z + fz * 2.1, 1.0);
+        DS.vfx.spawnRing(bx, bz, 0xff5511, reach * 0.95, 0.34, true);
+        DS.vfx.spawnFloorGlow(bx, bz, 0xff6622, reach * 1.05, 0.38, 0.9);
+        DS.vfx.spawnDecal(bx, bz, 'scorch', 3.4 * st.area, 3.2);
+        DS.vfx.addShake(0.32);
+        for (const m of monsters.slice()) {
+          const dx = m.x - bx;
+          const dz = m.z - bz;
+          const dist = Math.hypot(dx, dz);
+          if (dist <= reach * 0.95 + m.radius) {
+            const d = Math.max(0.1, dist);
+            damageMonster(m, baseDmg * 0.85, true, (dx / d) * 2.8, (dz / d) * 2.8);
+          }
+        }
+      }
+      addFury(hits > 0 ? (isFinisher ? 14 : 7) : 3);
+      return true;
+    }
+
+    if (hId === 'samurai') {
+      player.atkCd = 0.175 * Math.min(1, st.cd);
+      const reach = (isFinisher ? 5.8 : step === 2 ? 4.8 : 4.4) * st.area;
+      DS.audio.playSwordSlash(step);
+      // Swift cyan-crimson double arc
+      DS.vfx.spawnSlashArc(
+        player.x + fx * 1.2,
+        player.z + fz * 1.2,
+        dirYaw - 0.38,
+        0x5ce1ff,
+        reach * 0.76,
+        isFinisher ? 0.24 : 0.17,
+        6.8
+      );
+      DS.vfx.spawnSlashArc(
+        player.x + fx * 1.2,
+        player.z + fz * 1.2,
+        dirYaw + 0.42,
+        0xff3860,
+        reach * 0.72,
+        isFinisher ? 0.24 : 0.17,
+        -6.8
+      );
+      DS.vfx.spawnFloorGlow(player.x + fx * 1.6, player.z + fz * 1.6, isFinisher ? 0xff3860 : 0x5ce1ff, reach * 0.65, 0.22, 0.68);
+      if (isFinisher) {
+        DS.vfx.spawnRing(player.x + fx * 1.5, player.z + fz * 1.5, 0x5ce1ff, reach * 0.85, 0.26, true);
+        DS.vfx.addShake(0.24);
+      }
+      const hits = meleeSweep(reach, baseDmg * 1.05, isFinisher, isFinisher ? -1 : 0.0, isFinisher ? 2.1 : 0.9, fx, fz);
+      addFury(hits > 0 ? (isFinisher ? 14 : 7) : 2);
+      return true;
+    }
+
+    if (hId === 'viking') {
+      player.atkCd = 0.27 * Math.min(1, st.cd);
+      const reach = (isFinisher ? 6.1 : step === 2 ? 5.1 : 4.6) * st.area;
+      const color = isFinisher ? 0xff4411 : step === 2 ? 0xff7722 : 0xffaa33;
+      DS.audio.playSwordSlash(step);
+      DS.vfx.spawnSlashArc(
+        player.x + fx * 1.0,
+        player.z + fz * 1.0,
+        dirYaw + (step === 2 ? Math.PI * 0.55 : -Math.PI * 0.45),
+        color,
+        reach * 0.82,
+        isFinisher ? 0.28 : 0.22,
+        step === 2 ? -5.0 : 5.0
+      );
+      DS.vfx.spawnFloorGlow(player.x + fx * 1.5, player.z + fz * 1.5, color, reach * 0.75, 0.26, 0.7);
+      if (isFinisher) {
+        DS.vfx.spawnRing(player.x + fx * 1.4, player.z + fz * 1.4, 0xff6622, reach * 0.92, 0.34, true);
+        DS.vfx.addShake(0.36);
+        for (let k = 0; k < 8; k++) {
+          const a = (k / 8) * Math.PI * 2;
+          DS.vfx.smokeBatch.spawn(player.x + Math.cos(a) * 2, 0.4, player.z + Math.sin(a) * 2, Math.cos(a) * 5, 2, Math.sin(a) * 5, 0xccaa88, 1.0, 0.35);
+        }
+      }
+      const hits = meleeSweep(reach, baseDmg * 1.2, isFinisher, isFinisher ? -1 : -0.25, isFinisher ? 5.2 : 3.2, fx, fz);
+      addFury(hits > 0 ? (isFinisher ? 16 : 8) : 2);
+      return true;
+    }
+
+    // Knight (default): Radiant Gold Arc
+    player.atkCd = 0.22 * Math.min(1, st.cd);
+    const reach = (isFinisher ? 5.6 : step === 2 ? 4.6 : 4.2) * st.area;
+    const color = isFinisher ? 0xfff4a8 : step === 2 ? 0xffe066 : 0xffd464;
+    DS.audio.playSwordSlash(step);
+    DS.vfx.spawnSlashArc(
+      player.x + fx * 1.1,
+      player.z + fz * 1.1,
+      dirYaw + (step === 2 ? Math.PI * 0.45 : -Math.PI * 0.35),
+      color,
+      reach * 0.74,
+      isFinisher ? 0.26 : 0.19,
+      step === 2 ? -5.5 : 5.5
+    );
+    DS.vfx.spawnFloorGlow(player.x + fx * 1.6, player.z + fz * 1.6, 0xffd464, reach * 0.68, 0.24, 0.68);
+    if (isFinisher) {
+      DS.vfx.spawnRing(player.x + fx * 1.5, player.z + fz * 1.5, 0xffd464, reach * 0.85, 0.3, true);
+      DS.vfx.addShake(0.26);
+    }
+    const hits = meleeSweep(reach, baseDmg, isFinisher, isFinisher ? -1 : 0.05, isFinisher ? 2.6 : 1.2, fx, fz);
+    addFury(hits > 0 ? (isFinisher ? 14 : 7) : 2);
     return true;
   }
 
@@ -626,12 +894,219 @@
   }
 
   const projGeo = new THREE.SphereGeometry(0.32, 8, 8);
-  function spawnProjectile(x, z, vx, vz, color, dmg, rad, kind) {
-    if (projectiles.length > 50) return;
-    const mesh = new THREE.Mesh(projGeo, new THREE.MeshBasicMaterial({ color }));
+  const arrowGeo = new THREE.ConeGeometry(0.15, 0.95, 4);
+  arrowGeo.rotateX(Math.PI / 2);
+  const boltGeo = new THREE.CylinderGeometry(0.11, 0.16, 1.1, 6);
+  boltGeo.rotateX(Math.PI / 2);
+  const projMats = {};
+  function getProjMat(color) {
+    if (!projMats[color]) projMats[color] = new THREE.MeshBasicMaterial({ color });
+    return projMats[color];
+  }
+
+  function spawnProjectile(x, z, vx, vz, color, dmg, rad, kind, opts) {
+    if (projectiles.length > 64) return;
+    const o = opts || {};
+    const shape = o.shape || kind;
+    const geo = shape === 'arrow' ? arrowGeo : shape === 'arcane' ? boltGeo : projGeo;
+    const mesh = new THREE.Mesh(geo, getProjMat(color));
     mesh.position.set(x, 1.0, z);
+    mesh.rotation.y = Math.atan2(vx, vz);
     scene.add(mesh);
-    projectiles.push({ x, z, vx, vz, dmg, rad, kind, color, life: 1.6, mesh });
+    projectiles.push({
+      x,
+      z,
+      vx,
+      vz,
+      dmg,
+      rad,
+      kind,
+      color,
+      life: o.life || 1.6,
+      pierce: o.pierce || 1,
+      crit: !!o.crit,
+      fromCombo: !!o.fromCombo,
+      hitIds: new Set(),
+      hitBreakIds: new Set(),
+      mesh
+    });
+  }
+
+  // ==================== BOSS TELEGRAPHED PATTERNS ====================
+  function applyBossAreaDamage(hx, hz, rad, dmg, armor) {
+    if (Math.hypot(player.x - hx, player.z - hz) > rad) return;
+    if (player.invulnT <= 0) {
+      const taken = Math.max(1, Math.round(dmg) - armor);
+      player.hp -= taken;
+      player.invulnT = 0.55;
+      addFury(6);
+      DS.audio.playHurt();
+      DS.vfx.addShake(0.42);
+      showDmg(player.x, 2.8, player.z, '-' + taken, 'playerHit');
+      if (player.hp <= 0) {
+        player.hp = 0;
+        if (DS.game && DS.game.onPlayerDead) DS.game.onPlayerDead();
+      }
+    } else {
+      // Tactical reward for dashing through boss telegraphs with i-frames
+      showDmg(player.x, 3.0, player.z, 'DODGE!', 'heal');
+      addFury(8);
+    }
+  }
+
+  function executeBossSkill(b) {
+    if (!b || !b.alive) return false;
+    const dx = player.x - b.x;
+    const dz = player.z - b.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const nx = dx / d;
+    const nz = dz / d;
+
+    if (b.type === 'orcking') {
+      // Warlord Slam 5m ring
+      const step = Math.min(d, 8.5);
+      const tx = clampArena(b.x + nx * step, 2.0);
+      const tz = clampArena(b.z + nz * step, 2.0);
+      b.bossCastT = 1.05;
+      DS.vfx.spawnTelegraph(tx, tz, 5.0, 1.05, (ax, az, rad) => {
+        if (!b.alive) return;
+        b.x = ax;
+        b.z = az;
+        b.group.position.set(ax, 0, az);
+        DS.vfx.spawnRing(ax, az, 0xff4422, 5.2, 0.44, true);
+        DS.vfx.spawnFloorGlow(ax, az, 0xff5522, 5.6, 0.45, 0.9);
+        DS.vfx.spawnDecal(ax, az, 'scorch', 4.2, 3.0);
+        DS.vfx.addShake(0.65);
+        DS.audio.playSkillSfx('fire');
+        for (let k = 0; k < 12; k++) {
+          DS.vfx.smokeBatch.spawn(ax, 0.5, az, (Math.random() - 0.5) * 9, 2 + Math.random() * 5, (Math.random() - 0.5) * 9, 0xcc8855, 1.2, 0.45);
+        }
+        applyBossAreaDamage(ax, az, rad, b.dmg * 1.45, effectiveStats().armor);
+      });
+      return true;
+    }
+
+    if (b.type === 'minotaur') {
+      // Charge lunge + impact shockwave
+      const chargeDist = Math.min(13.5, Math.max(6.5, d + 1.5));
+      const endX = clampArena(b.x + nx * chargeDist, 2.0);
+      const endZ = clampArena(b.z + nz * chargeDist, 2.0);
+      const actualDist = Math.hypot(endX - b.x, endZ - b.z) || 1;
+      const midX = b.x + (endX - b.x) * 0.5;
+      const midZ = b.z + (endZ - b.z) * 0.5;
+      b.bossCastT = 1.05;
+      b.chargeWindupT = 0.65;
+      b.chargeMoveT = 0.4;
+      b.chargeDirX = (endX - b.x) / actualDist;
+      b.chargeDirZ = (endZ - b.z) / actualDist;
+      b.chargeSpeed = actualDist / 0.4;
+
+      DS.vfx.spawnTelegraph(midX, midZ, 2.6, 0.78, (ax, az, rad) => {
+        if (!b.alive) return;
+        applyBossAreaDamage(ax, az, rad, b.dmg * 1.1, effectiveStats().armor);
+      });
+      DS.vfx.spawnTelegraph(endX, endZ, 4.5, 1.05, (ax, az, rad) => {
+        if (!b.alive) return;
+        DS.vfx.spawnRing(ax, az, 0xff4422, 4.8, 0.45, true);
+        DS.vfx.spawnFloorGlow(ax, az, 0xff5522, 5.2, 0.45, 0.9);
+        DS.vfx.spawnDecal(ax, az, 'scorch', 3.6, 3.0);
+        DS.vfx.addShake(0.7);
+        DS.audio.playSkillSfx('fire');
+        applyBossAreaDamage(ax, az, rad, b.dmg * 1.5, effectiveStats().armor);
+      });
+      return true;
+    }
+
+    if (b.type === 'titan') {
+      // 3x telegraphed Molten Pillars
+      b.bossCastT = 0.9;
+      const baseAng = Math.random() * Math.PI * 2;
+      const spots = [
+        [clampArena(player.x, 2.0), clampArena(player.z, 2.0)],
+        [clampArena(player.x + Math.cos(baseAng) * 4.5, 2.0), clampArena(player.z + Math.sin(baseAng) * 4.5, 2.0)],
+        [clampArena(player.x + Math.cos(baseAng + 2.2) * 4.5, 2.0), clampArena(player.z + Math.sin(baseAng + 2.2) * 4.5, 2.0)]
+      ];
+      spots.forEach(([px, pz], idx) => {
+        DS.vfx.spawnTelegraph(px, pz, 3.4, 1.0 + idx * 0.15, (ax, az, rad) => {
+          if (!b.alive) return;
+          DS.vfx.spawnRing(ax, az, 0xff5511, 3.7, 0.42, true);
+          DS.vfx.spawnFloorGlow(ax, az, 0xff6622, 4.2, 0.55, 0.92);
+          DS.vfx.spawnDecal(ax, az, 'scorch', 3.0, 3.2);
+          for (let k = 0; k < 14; k++) {
+            DS.vfx.fireBatch.spawn(
+              ax + (Math.random() - 0.5) * 1.2,
+              0.3 + k * 0.35,
+              az + (Math.random() - 0.5) * 1.2,
+              (Math.random() - 0.5) * 3,
+              6 + Math.random() * 7,
+              (Math.random() - 0.5) * 3,
+              k % 2 === 0 ? 0xffaa33 : 0xff4411,
+              1.05,
+              0.48
+            );
+          }
+          DS.vfx.smokeBatch.spawn(ax, 1.2, az, 0, 3.5, 0, 0x775544, 1.3, 0.5);
+          DS.vfx.addShake(0.45);
+          DS.audio.playSkillSfx('fire');
+          applyBossAreaDamage(ax, az, rad, b.dmg * 1.3, effectiveStats().armor);
+        });
+      });
+      return true;
+    }
+
+    // dragon: 4x telegraphed cool-blue Sky Lightning & Frost shockwaves (STRICTLY #ffffff, #66ccff, #3399ff)
+    b.bossCastT = 0.95;
+    const baseAng = Math.random() * Math.PI * 2;
+    const spots = [
+      [clampArena(player.x, 2.0), clampArena(player.z, 2.0)],
+      [clampArena(player.x + Math.cos(baseAng) * 4.6, 2.0), clampArena(player.z + Math.sin(baseAng) * 4.6, 2.0)],
+      [clampArena(player.x + Math.cos(baseAng + (Math.PI * 2) / 3) * 4.6, 2.0), clampArena(player.z + Math.sin(baseAng + (Math.PI * 2) / 3) * 4.6, 2.0)],
+      [clampArena(player.x + Math.cos(baseAng + (Math.PI * 4) / 3) * 4.6, 2.0), clampArena(player.z + Math.sin(baseAng + (Math.PI * 4) / 3) * 4.6, 2.0)]
+    ];
+    spots.forEach(([px, pz], idx) => {
+      DS.vfx.spawnTelegraph(px, pz, 3.6, 0.98 + idx * 0.12, (ax, az, rad) => {
+        if (!b.alive) return;
+        DS.vfx.spawnLightning(ax, 15, az, ax, 0.35, az);
+        DS.vfx.spawnRing(ax, az, 0x66ccff, 3.8, 0.42, true);
+        DS.vfx.spawnFloorGlow(ax, az, 0x3399ff, 4.4, 0.45, 0.88);
+        DS.vfx.spawnDecal(ax, az, 'ice', 3.2, 3.0);
+        for (let k = 0; k < 10; k++) {
+          DS.vfx.iceBatch.spawn(
+            ax,
+            0.5,
+            az,
+            (Math.random() - 0.5) * 9,
+            2 + Math.random() * 5,
+            (Math.random() - 0.5) * 9,
+            k % 3 === 0 ? 0xffffff : k % 3 === 1 ? 0x66ccff : 0x3399ff,
+            0.75,
+            0.38
+          );
+        }
+        DS.vfx.addShake(0.45);
+        DS.audio.playSkillSfx('lightning');
+        applyBossAreaDamage(ax, az, rad, b.dmg * 1.25, effectiveStats().armor);
+      });
+    });
+    return true;
+  }
+
+  function triggerBossSkill(preferredBoss) {
+    let target = preferredBoss && preferredBoss.alive && preferredBoss.boss ? preferredBoss : null;
+    if (!target) {
+      let bestD = Infinity;
+      for (const m of monsters) {
+        if (!m.alive || !m.boss) continue;
+        const d = Math.hypot(m.x - player.x, m.z - player.z);
+        if (d < bestD) {
+          bestD = d;
+          target = m;
+        }
+      }
+    }
+    if (!target) return false;
+    target.skillCd = 4.6;
+    return executeBossSkill(target);
   }
 
   // ==================== MAIN UPDATE ====================
@@ -645,6 +1120,17 @@
     if (player.comboResetT > 0) player.comboResetT -= dt;
     if (player.dashCd > 0) player.dashCd = Math.max(0, player.dashCd - dt);
     if (player.invulnT > 0) player.invulnT -= dt;
+    if (player.streakT > 0) {
+      player.streakT -= dt;
+      if (player.streakT <= 0) {
+        player.streakT = 0;
+        player.streak = 0;
+      }
+    }
+    if (player.shrineBuff) {
+      player.shrineBuff.timer -= dt;
+      if (player.shrineBuff.timer <= 0) player.shrineBuff = null;
+    }
     if (player.berserkT > 0) {
       player.berserkT -= dt;
       player.berserkHalo.visible = true;
@@ -654,8 +1140,9 @@
     }
 
     // Regen
-    if (player.regen > 0 && player.hp < player.maxHp) {
-      player.hp = Math.min(player.maxHp, player.hp + (player.regen + (passives.p_hp || 0) * 2) * dt);
+    const shrineRegen = player.shrineBuff && player.shrineBuff.type === 'magnet' ? 3.0 : 0;
+    if ((player.regen > 0 || shrineRegen > 0) && player.hp < player.maxHp) {
+      player.hp = Math.min(player.maxHp, player.hp + (player.regen + (passives.p_hp || 0) * 2 + shrineRegen) * dt);
     }
 
     // Player Movement + Dash
@@ -744,6 +1231,91 @@
       }
     }
 
+    // 4 Interactive District Shrines (3.8m radius, 2.2s charge, 18s buff, 60s respawn)
+    player.shrineCharging = null;
+    if (DS.world.shrines) {
+      for (const sh of DS.world.shrines) {
+        if (!sh.ready) {
+          sh.respawnT -= dt;
+          if (sh.respawnT <= 0) {
+            sh.ready = true;
+            sh.charge = 0;
+            sh.orb.visible = true;
+            sh.outerRing.visible = true;
+            sh.glowDisc.visible = true;
+            sh.chargeDisc.visible = false;
+            sh.chargeDisc.scale.set(0.05, 1, 0.05);
+            DS.vfx.spawnRing(sh.x, sh.z, sh.def.color, 4.2, 0.45, false);
+          }
+          continue;
+        }
+        sh.orb.rotation.y += dt * (sh.charge > 0 ? 5.2 : 1.7);
+        sh.orb.position.y = 1.72 + Math.sin(frameTick * 0.07) * 0.16;
+        const sd = Math.hypot(player.x - sh.x, player.z - sh.z);
+        if (sd <= sh.radius) {
+          sh.charge += dt;
+          const prog = Math.min(1, sh.charge / sh.chargeDur);
+          player.shrineCharging = { id: sh.def.id, progress: prog, def: sh.def };
+          sh.chargeDisc.visible = true;
+          const sc = Math.max(0.06, prog);
+          sh.chargeDisc.scale.set(sc, 1, sc);
+          if (frameTick % 4 === 0) {
+            DS.vfx.elecBatch.spawn(
+              sh.x + (Math.random() - 0.5) * 2.2,
+              0.4,
+              sh.z + (Math.random() - 0.5) * 2.2,
+              0,
+              3.2,
+              0,
+              sh.def.color === 0xffd464 ? 0x66ccff : 0x5ce1ff,
+              0.5,
+              0.35
+            );
+          }
+          if (sh.charge >= sh.chargeDur) {
+            sh.ready = false;
+            sh.respawnT = 60.0;
+            sh.charge = 0;
+            sh.orb.visible = false;
+            sh.outerRing.visible = false;
+            sh.glowDisc.visible = false;
+            sh.chargeDisc.visible = false;
+            player.shrineCharging = null;
+
+            const healAmt = Math.round(player.maxHp * 0.35);
+            player.hp = Math.min(player.maxHp, player.hp + healAmt);
+            showDmg(player.x, 2.8, player.z, '+' + healAmt, 'heal');
+            player.shrineBuff = { id: sh.def.id, type: sh.def.buffType, timer: 18.0, def: sh.def };
+
+            for (const m of monsters.slice()) {
+              const mdx = m.x - sh.x;
+              const mdz = m.z - sh.z;
+              const md = Math.hypot(mdx, mdz);
+              if (md <= 9.5 + m.radius) {
+                const n = Math.max(0.1, md);
+                damageMonster(m, 100 * st.might, true, (mdx / n) * 4.8, (mdz / n) * 4.8);
+              }
+            }
+            DS.vfx.spawnRing(sh.x, sh.z, sh.def.color, 9.5, 0.5, true);
+            DS.vfx.spawnFloorGlow(sh.x, sh.z, sh.def.color, 9.0, 0.65, 0.92);
+            DS.vfx.spawnLightning(sh.x, 12, sh.z, sh.x, 0.4, sh.z);
+            DS.vfx.addShake(0.35);
+            DS.audio.playLore();
+            if (DS.ui && DS.ui.showShrineToast) DS.ui.showShrineToast(sh.def);
+          }
+        } else if (sh.charge > 0) {
+          sh.charge = Math.max(0, sh.charge - dt * 1.4);
+          if (sh.charge <= 0.01) {
+            sh.charge = 0;
+            sh.chargeDisc.visible = false;
+          } else {
+            const sc = Math.max(0.06, sh.charge / sh.chargeDur);
+            sh.chargeDisc.scale.set(sc, 1, sc);
+          }
+        }
+      }
+    }
+
     // Projectiles
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const p = projectiles[i];
@@ -753,21 +1325,48 @@
       p.mesh.position.set(p.x, 1.0, p.z);
       if (p.kind === 'fire') {
         DS.vfx.fireBatch.spawn(p.x, 1.0, p.z, 0, 0.8, 0, 0xff7722, 0.55, 0.2);
+      } else if (p.kind === 'arcane' && frameTick % 2 === 0) {
+        DS.vfx.elecBatch.spawn(p.x, 1.0, p.z, 0, 0.5, 0, frameTick % 4 === 0 ? 0xffffff : 0x66ccff, 0.5, 0.18);
       }
-      let hit = false;
+
+      let exhausted = false;
       for (const m of monsters.slice()) {
+        if (p.hitIds.has(m.uid)) continue;
         if (Math.hypot(m.x - p.x, m.z - p.z) < p.rad + m.radius) {
+          p.hitIds.add(m.uid);
           if (p.kind === 'frost') m.slowT = 2.0;
           if (p.kind === 'fire') {
             DS.vfx.spawnFloorGlow(p.x, p.z, 0xff6622, 3.2, 0.3, 0.8);
             DS.vfx.spawnDecal(p.x, p.z, 'scorch', 2.2, 2.5);
+          } else if (p.kind === 'arcane') {
+            DS.vfx.elecBatch.spawn(m.x, 1.0, m.z, (Math.random() - 0.5) * 4, 2.5, (Math.random() - 0.5) * 4, 0x66ccff, 0.6, 0.22);
           }
-          damageMonster(m, p.dmg, false, (p.vx * 0.04), (p.vz * 0.04));
-          hit = true;
-          break;
+          damageMonster(m, p.dmg, p.crit, p.vx * 0.03, p.vz * 0.03);
+          if (p.fromCombo) addFury(2.5);
+          p.pierce--;
+          if (p.pierce <= 0) {
+            exhausted = true;
+            break;
+          }
         }
       }
-      if (hit || p.life <= 0) {
+      if (!exhausted && (p.kind === 'arrow' || p.kind === 'arcane' || p.kind === 'fire')) {
+        for (let bi = 0; bi < DS.world.breakables.length; bi++) {
+          const b = DS.world.breakables[bi];
+          if (!b.alive || p.hitBreakIds.has(bi)) continue;
+          if (Math.hypot(b.x - p.x, b.z - p.z) < p.rad + b.radius) {
+            p.hitBreakIds.add(bi);
+            b.hp -= p.dmg;
+            if (b.hp <= 0) smashBreakable(b);
+            p.pierce--;
+            if (p.pierce <= 0) {
+              exhausted = true;
+              break;
+            }
+          }
+        }
+      }
+      if (exhausted || p.life <= 0) {
         scene.remove(p.mesh);
         projectiles.splice(i, 1);
       }
@@ -815,11 +1414,38 @@
       const dz = player.z - m.z;
       const d2 = dx * dx + dz * dz;
       const d = Math.sqrt(d2) || 0.01;
-      const spd = m.spd * (m.slowT > 0 ? 0.55 : 1);
-      m.x += (dx / d) * spd * dt;
-      m.z += (dz / d) * spd * dt;
-      m.group.position.set(m.x, 0, m.z);
-      m.group.rotation.y = Math.atan2(dx, dz);
+
+      if (m.boss) {
+        m.skillCd -= dt;
+        if (m.skillCd <= 0) {
+          m.skillCd = 4.6;
+          executeBossSkill(m);
+        }
+      }
+
+      if (m.chargeWindupT > 0) {
+        m.chargeWindupT -= dt;
+        m.group.rotation.y = Math.atan2(m.chargeDirX, m.chargeDirZ);
+      } else if (m.chargeMoveT > 0) {
+        m.chargeMoveT -= dt;
+        m.x = clampArena(m.x + m.chargeDirX * m.chargeSpeed * dt, 1.5);
+        m.z = clampArena(m.z + m.chargeDirZ * m.chargeSpeed * dt, 1.5);
+        m.group.position.set(m.x, 0, m.z);
+        m.group.rotation.y = Math.atan2(m.chargeDirX, m.chargeDirZ);
+        if (frameTick % 2 === 0) {
+          DS.vfx.smokeBatch.spawn(m.x, 0.4, m.z, 0, 1.5, 0, 0xaa8866, 1.1, 0.3);
+        }
+      } else {
+        let spd = m.spd * (m.slowT > 0 ? 0.55 : 1);
+        if (m.bossCastT > 0) {
+          m.bossCastT -= dt;
+          spd *= 0.25;
+        }
+        m.x += (dx / d) * spd * dt;
+        m.z += (dz / d) * spd * dt;
+        m.group.position.set(m.x, 0, m.z);
+        m.group.rotation.y = Math.atan2(dx, dz);
+      }
 
       // Distance-throttled skeletal AnimationMixer
       if (m.mixer) {
@@ -838,7 +1464,7 @@
         const taken = Math.max(1, m.dmg - st.armor);
         player.hp -= taken;
         player.invulnT = 0.55;
-        player.fury = Math.min(100, player.fury + 6);
+        addFury(6);
         DS.audio.playHurt();
         DS.vfx.addShake(0.32);
         showDmg(player.x, 2.8, player.z, '-' + taken, 'playerHit');
@@ -893,6 +1519,7 @@
     triggerPlayerCombo,
     triggerDash,
     triggerUltimate,
+    triggerBossSkill,
     fireSkill,
     effectiveStats,
     update: updateEntities,

@@ -466,6 +466,100 @@
     s.mesh.visible = true;
   }
 
+  // Pooled Crimson Boss Warning Telegraph Rings (16)
+  const telOuterGeo = new THREE.RingGeometry(0.92, 1.0, 40);
+  telOuterGeo.rotateX(-Math.PI / 2);
+  const telEdgeGeo = new THREE.RingGeometry(0.88, 1.0, 40);
+  telEdgeGeo.rotateX(-Math.PI / 2);
+  const telFillGeo = new THREE.CircleGeometry(1.0, 40);
+  telFillGeo.rotateX(-Math.PI / 2);
+  const telegraphPool = [];
+  for (let i = 0; i < 16; i++) {
+    const grp = new THREE.Group();
+    grp.visible = false;
+    const outer = new THREE.Mesh(
+      telOuterGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0xff2244,
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      })
+    );
+    outer.position.y = 0.06;
+    const fill = new THREE.Mesh(
+      telFillGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0xff1e3c,
+        transparent: true,
+        opacity: 0.2,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      })
+    );
+    fill.position.y = 0.052;
+    const edge = new THREE.Mesh(
+      telEdgeGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0xff6677,
+        transparent: true,
+        opacity: 0.8,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      })
+    );
+    edge.position.y = 0.056;
+    grp.add(outer, fill, edge);
+    scene.add(grp);
+    telegraphPool.push({
+      grp,
+      outer,
+      fill,
+      edge,
+      active: false,
+      x: 0,
+      z: 0,
+      radius: 4,
+      dur: 1.0,
+      elapsed: 0,
+      onDetonate: null
+    });
+  }
+  let telCur = 0;
+
+  function spawnTelegraph(x, z, radius, dur, onDetonate) {
+    let slot = null;
+    for (let i = 0; i < telegraphPool.length; i++) {
+      const cand = telegraphPool[(telCur + i) % telegraphPool.length];
+      if (!cand.active) {
+        slot = cand;
+        telCur = (telCur + i + 1) % telegraphPool.length;
+        break;
+      }
+    }
+    if (!slot) {
+      slot = telegraphPool[telCur];
+      telCur = (telCur + 1) % telegraphPool.length;
+    }
+    const r = radius || 4;
+    slot.active = true;
+    slot.x = x;
+    slot.z = z;
+    slot.radius = r;
+    slot.dur = Math.max(0.15, dur || 1.0);
+    slot.elapsed = 0;
+    slot.onDetonate = onDetonate || null;
+    slot.grp.position.set(x, 0, z);
+    slot.outer.scale.set(r, 1, r);
+    slot.fill.scale.set(r * 0.05, 1, r * 0.05);
+    slot.edge.scale.set(r * 0.05, 1, r * 0.05);
+    slot.fill.material.opacity = 0.16;
+    slot.outer.material.opacity = 0.9;
+    slot.grp.visible = true;
+    return slot;
+  }
+
   // Cool-Blue Fractal 3-Layer Lightning Bolts (24 pooled groups — STRICTLY #ffffff / #7ce0ff / #2b88ff)
   const boltGeo = new THREE.CylinderGeometry(1, 1, 1, 4, 1, true);
   const boltWhiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.98, blending: THREE.AdditiveBlending, depthWrite: false });
@@ -491,6 +585,7 @@
   const _vA = new THREE.Vector3();
   const _vB = new THREE.Vector3();
   const _vMid = new THREE.Vector3();
+  const _vDir = new THREE.Vector3();
   const _vUp = new THREE.Vector3(0, 1, 0);
 
   function spawnLightning(ax, ay, az, bx, by, bz) {
@@ -512,13 +607,13 @@
       _vA.copy(pts[i]);
       _vB.copy(pts[i + 1]);
       _vMid.addVectors(_vA, _vB).multiplyScalar(0.5);
-      const dir = _vB.clone().sub(_vA);
-      const len = Math.max(0.05, dir.length());
-      dir.normalize();
+      _vDir.subVectors(_vB, _vA);
+      const len = Math.max(0.05, _vDir.length());
+      _vDir.normalize();
       const { mCore, mGlow, mAura } = b.segs[i];
       for (const [m, rad] of [[mCore, 0.05], [mGlow, 0.14], [mAura, 0.28]]) {
         m.position.copy(_vMid);
-        m.quaternion.setFromUnitVectors(_vUp, dir);
+        m.quaternion.setFromUnitVectors(_vUp, _vDir);
         m.scale.set(rad, len * 1.05, rad);
       }
     }
@@ -619,6 +714,23 @@
       b.life -= dt;
       if (b.life <= 0) b.grp.visible = false;
     }
+    for (const t of telegraphPool) {
+      if (!t.active) continue;
+      t.elapsed += dt;
+      const p = Math.min(1, t.elapsed / t.dur);
+      const sc = Math.max(0.05, p) * t.radius;
+      t.fill.scale.set(sc, 1, sc);
+      t.edge.scale.set(sc, 1, sc);
+      t.fill.material.opacity = 0.16 + p * 0.34;
+      t.outer.material.opacity = 0.72 + Math.sin(now * 18) * 0.2;
+      if (t.elapsed >= t.dur) {
+        t.active = false;
+        t.grp.visible = false;
+        const cb = t.onDetonate;
+        t.onDetonate = null;
+        if (cb) cb(t.x, t.z, t.radius);
+      }
+    }
     for (let i = 0; i < torchFlames.length; i++) {
       const f = torchFlames[i];
       f.quaternion.copy(camera.quaternion);
@@ -693,6 +805,8 @@
     spawnRing,
     spawnSlashArc,
     spawnLightning,
+    spawnTelegraph,
+    telegraphs: telegraphPool,
     addTorchEffect,
     addShake,
     update: updateVfx,
@@ -708,6 +822,11 @@
       for (const r of ringPool) r.mesh.visible = false;
       for (const s of slashPool) s.mesh.visible = false;
       for (const b of BOLT_POOL) b.grp.visible = false;
+      for (const t of telegraphPool) {
+        t.active = false;
+        t.grp.visible = false;
+        t.onDetonate = null;
+      }
     }
   };
 })();

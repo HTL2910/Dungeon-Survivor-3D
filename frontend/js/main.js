@@ -257,6 +257,8 @@
       raycaster.setFromCamera(mouseNdc, DS.vfx.camera);
       if (raycaster.ray.intersectPlane(groundPlane, aimPoint)) {
         const p = DS.entities.player;
+        p.aimX = aimPoint.x;
+        p.aimZ = aimPoint.z;
         p.aimYaw = Math.atan2(aimPoint.x - p.x, aimPoint.z - p.z);
         p.hasMouseAim = true;
       }
@@ -481,22 +483,28 @@
     triggerCombo() {
       return DS.entities.triggerPlayerCombo();
     },
+    triggerBossSkill() {
+      return DS.entities.triggerBossSkill(activeBoss);
+    },
     setTime(sec) {
       runTime = sec;
       return runTime;
     },
     getState() {
+      const p = DS.entities.player;
       return {
         state,
         runTime: Number(runTime.toFixed(2)),
         monsters: DS.entities.monsters.length,
-        kills: DS.entities.player.kills,
-        hp: DS.entities.player.hp,
-        fury: DS.entities.player.fury,
+        kills: p.kills,
+        hp: p.hp,
+        fury: p.fury,
+        streak: p.streak,
+        shrineBuff: p.shrineBuff ? p.shrineBuff.id : null,
         scrolls: collectedScrollsRun.size,
         quality: profile ? profile.quality : 'balanced',
         arenaLimit: DS.world.ARENA_LIMIT,
-        zone: DS.world.getZoneFor(DS.entities.player.x, DS.entities.player.z).id
+        zone: DS.world.getZoneFor(p.x, p.z).id
       };
     }
   };

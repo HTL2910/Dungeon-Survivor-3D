@@ -261,6 +261,37 @@
     }
   ];
 
+  DS.SHRINE_DEFS = [
+    {
+      id: 'north', x: 0, z: -62, buffType: 'might', color: 0xffd464,
+      nameVi: 'Đài Tế Chiến Thần (Bắc)', nameEn: 'North Shrine of Might',
+      buffVi: '⚔️ +30% Sát Thương', buffEn: '⚔️ +30% Might',
+      descVi: 'Tế đàn cổ kích hoạt: +30% Sát Thương (18s) & hồi 35% Máu!',
+      descEn: 'Ancient shrine activated: +30% Might (18s) & +35% HP!'
+    },
+    {
+      id: 'south', x: 0, z: 62, buffType: 'magnet', color: 0x5ce1ff,
+      nameVi: 'Đài Tế Thu Hồn (Nam)', nameEn: 'South Shrine of Soul Magnet',
+      buffVi: '🧲 +100% Hút Ngọc', buffEn: '🧲 +100% Magnet',
+      descVi: 'Tế đàn cổ kích hoạt: +100% Tầm Hút & Hồi Phục (18s) + 35% Máu!',
+      descEn: 'Ancient shrine activated: +100% Magnet & Regen (18s) + 35% HP!'
+    },
+    {
+      id: 'east', x: 62, z: 0, buffType: 'speed', color: 0xffd464,
+      nameVi: 'Đài Tế Thần Hành (Đông)', nameEn: 'East Shrine of Swiftness',
+      buffVi: '💨 +25% Tốc Chạy', buffEn: '💨 +25% Speed',
+      descVi: 'Tế đàn cổ kích hoạt: +25% Tốc Chạy (18s) & hồi 35% Máu!',
+      descEn: 'Ancient shrine activated: +25% Speed (18s) & +35% HP!'
+    },
+    {
+      id: 'west', x: -62, z: 0, buffType: 'area', color: 0x5ce1ff,
+      nameVi: 'Đài Tế Bành Trướng (Tây)', nameEn: 'West Shrine of Expansion',
+      buffVi: '💠 +35% Phạm Vi', buffEn: '💠 +35% Area',
+      descVi: 'Tế đàn cổ kích hoạt: +35% Phạm Vi Chiêu (18s) & hồi 35% Máu!',
+      descEn: 'Ancient shrine activated: +35% Area (18s) & +35% HP!'
+    }
+  ];
+
   DS.I18N = {
     vi: {
       title: 'ẤN KIẾM ĐỊA NGỤC',

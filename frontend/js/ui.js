@@ -294,6 +294,34 @@
     const qDef = DS.QUALITY_PRESETS[qualityId] || DS.QUALITY_PRESETS.balanced;
     $('qBadge').textContent = txt(qDef.vi, qDef.en);
 
+    const sb = $('streakBadge');
+    if (sb) {
+      if (p.streak >= 1) {
+        sb.classList.remove('hidden');
+        sb.classList.toggle('hot', p.streak >= 10);
+        sb.textContent = '🔥 x' + p.streak + ' STREAK' + (p.streak >= 10 ? ' ⚡+20%' : '');
+      } else {
+        sb.classList.add('hidden');
+      }
+    }
+
+    const sp = $('shrineBuffPill');
+    if (sp) {
+      if (p.shrineCharging) {
+        sp.classList.remove('hidden');
+        sp.classList.add('charging');
+        sp.textContent = '⏳ ' + txt('Đài Tế', 'Shrine') + ' ' + Math.round(p.shrineCharging.progress * 100) + '%';
+      } else if (p.shrineBuff && p.shrineBuff.timer > 0) {
+        sp.classList.remove('hidden');
+        sp.classList.remove('charging');
+        const sd = p.shrineBuff.def;
+        sp.textContent = txt(sd.buffVi, sd.buffEn) + ' • ' + p.shrineBuff.timer.toFixed(1) + 's';
+      } else {
+        sp.classList.add('hidden');
+        sp.classList.remove('charging');
+      }
+    }
+
     if (activeBoss && activeBoss.alive) {
       $('bossBarWrap').classList.remove('hidden');
       const mDef = DS.MONSTER_STATS[activeBoss.type];
@@ -339,6 +367,14 @@
     $('loreToast').classList.remove('hidden');
     clearTimeout(loreTimer);
     loreTimer = setTimeout(() => $('loreToast').classList.add('hidden'), 6500);
+  }
+
+  function showShrineToast(shrineDef) {
+    $('loreTitle').textContent = '🏛️ ' + txt(shrineDef.nameVi, shrineDef.nameEn);
+    $('loreBody').textContent = txt(shrineDef.descVi, shrineDef.descEn);
+    $('loreToast').classList.remove('hidden');
+    clearTimeout(loreTimer);
+    loreTimer = setTimeout(() => $('loreToast').classList.add('hidden'), 5000);
   }
 
   function showGameOver(win, runTime) {
@@ -387,6 +423,21 @@
       ctx.beginPath();
       ctx.arc(toX(ln.x), toY(ln.z), 3.3, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    // Ready District Shrines (Cyan 4x4 rotated diamonds)
+    if (DS.world.shrines) {
+      ctx.fillStyle = '#5ce1ff';
+      for (const sh of DS.world.shrines) {
+        if (!sh.ready) continue;
+        const sx = toX(sh.x);
+        const sy = toY(sh.z);
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(Math.PI / 4);
+        ctx.fillRect(-2, -2, 4, 4);
+        ctx.restore();
+      }
     }
 
     // Alive Treasure Chests (Gold)
@@ -448,6 +499,7 @@
     drawMinimap,
     showStoryBanner,
     showLoreToast,
+    showShrineToast,
     showGameOver
   };
 })();

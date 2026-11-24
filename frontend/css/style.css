@@ -206,7 +206,7 @@ canvas:not(#minimap) {
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  margin-top: 18px;
+  margin-top: 24px;
 }
 
 #timer {
@@ -266,6 +266,53 @@ canvas:not(#minimap) {
   z-index: 11;
 }
 
+#hudStatusStack {
+  position: absolute;
+  top: 212px;
+  right: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 230px;
+  pointer-events: none;
+  z-index: 11;
+}
+
+.statusPill {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--txt);
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.55);
+}
+
+#streakBadge {
+  border-color: rgba(255, 140, 56, 0.65);
+  color: #ffd464;
+}
+
+#streakBadge.hot {
+  border-color: #ff5666;
+  background: linear-gradient(135deg, rgba(64, 16, 22, 0.94), rgba(44, 24, 10, 0.94));
+  color: #ffe28a;
+  box-shadow: 0 0 14px rgba(255, 110, 50, 0.55);
+}
+
+#shrineBuffPill {
+  border-color: rgba(92, 225, 255, 0.65);
+  color: #8ceeff;
+}
+
+#shrineBuffPill.charging {
+  border-color: rgba(255, 212, 100, 0.78);
+  color: #ffd464;
+}
+
 #hudRight {
   display: flex;
   flex-direction: column;
@@ -313,7 +360,7 @@ canvas:not(#minimap) {
 
 #bossBarWrap {
   position: absolute;
-  top: 108px;
+  top: 124px;
   left: 50%;
   transform: translateX(-50%);
   width: min(440px, 84vw);
@@ -486,7 +533,7 @@ canvas:not(#minimap) {
 /* Story Banner & Lore Toast */
 #storyBanner {
   position: absolute;
-  top: 148px;
+  top: 170px;
   left: 50%;
   transform: translateX(-50%);
   width: min(560px, 90vw);
@@ -997,32 +1044,50 @@ select.btn {
 }
 
 @media (max-width: 520px) {
+  #lvBadge {
+    top: 11px;
+    padding: 1px 8px;
+    font-size: 11px;
+    line-height: 1.2;
+  }
   #hudTop {
     top: 12px;
     left: 8px;
     right: 8px;
-    gap: 6px;
+    gap: 5px;
   }
   #hudLeft {
-    width: 158px;
-    max-width: 45vw;
+    width: 148px;
+    max-width: 42vw;
     padding: 6px 7px;
+    flex-shrink: 0;
   }
   .subBarTxt {
     font-size: 8px;
     white-space: nowrap;
   }
   #hudCenter {
-    margin-top: 14px;
+    margin-top: 19px;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
   }
   #hudMidPills {
     gap: 3px;
     flex-wrap: wrap;
     justify-content: center;
+    max-width: 100%;
   }
   .pillStat {
-    font-size: 9.5px;
-    padding: 2px 6px;
+    font-size: 9px;
+    padding: 1.5px 5px;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #hudRight {
+    flex-shrink: 0;
   }
   #minimap {
     top: 94px;
@@ -1030,14 +1095,30 @@ select.btn {
     width: 72px;
     height: 72px;
   }
+  #hudStatusStack {
+    top: 180px;
+    right: 8px;
+    max-width: calc(100vw - 16px);
+    gap: 4px;
+  }
+  .statusPill {
+    font-size: 10px;
+    padding: 3px 8px;
+    max-width: 176px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   #bossBarWrap {
-    top: 112px;
+    top: 122px;
     left: 8px;
     transform: none;
     width: calc(100vw - 96px);
   }
+  #storyBanner {
+    top: 238px;
+  }
   #timer {
-    font-size: 20px;
+    font-size: 18px;
   }
   .chip {
     padding: 4px 7px;
