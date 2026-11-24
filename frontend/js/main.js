@@ -66,11 +66,14 @@
     DS.entities.resetEntities(selectedHeroId, profile);
     DS.entities.spawnPack('slime', 6, 14);
     state = 'playing';
+    lastIdleRender = 0;
 
     triggeredChapters.add(0);
     DS.ui.showStoryBanner(DS.STORY.chapters[0]);
     DS.ui.updateHud(runTime, activeBoss, collectedScrollsRun.size, profile ? profile.quality : 'balanced');
     DS.ui.drawMinimap(activeBoss);
+    DS.vfx.update(0, performance.now() * 0.001, DS.entities.player.x, DS.entities.player.z);
+    DS.vfx.renderFrame();
   }
 
   function startRequested() {
@@ -80,6 +83,7 @@
     } catch {}
     if (!seen) {
       state = 'story';
+      lastIdleRender = 0;
       hideAllOverlays();
       DS.ui.showStoryModal(profile, true, () => beginPlay());
     } else {
@@ -90,6 +94,7 @@
   async function finishRun(win) {
     if (state === 'over') return;
     state = 'over';
+    lastIdleRender = 0;
     DS.entities.clearDmgNumbers();
     const p = DS.entities.player;
     const patch = {
@@ -103,6 +108,7 @@
 
   function openDraftModal() {
     state = 'draft';
+    lastIdleRender = 0;
     DS.audio.playLevelUp();
     DS.ui.renderDraft(
       DS.entities.skills,
@@ -122,6 +128,7 @@
         }
         $('draftScr').classList.add('hidden');
         state = 'playing';
+        lastIdleRender = 0;
       }
     );
   }
@@ -191,6 +198,7 @@
 
   let lastFrameMs = performance.now();
   let minimapTick = 0;
+  let lastIdleRender = 0;
   function animate(nowMs) {
     requestAnimationFrame(animate);
     const dt = Math.min(0.05, Math.max(0.001, (nowMs - lastFrameMs) / 1000));
@@ -212,10 +220,12 @@
       DS.vfx.update(dt, nowMs * 0.001, p.x, p.z);
       DS.ui.updateHud(runTime, activeBoss, collectedScrollsRun.size, profile ? profile.quality : 'balanced');
       if (minimapTick++ % 4 === 0) DS.ui.drawMinimap(activeBoss);
-    } else {
+      DS.vfx.renderFrame();
+    } else if (nowMs - lastIdleRender >= 500) {
+      lastIdleRender = nowMs;
       DS.vfx.update(0, nowMs * 0.001, DS.entities.player.x, DS.entities.player.z);
+      DS.vfx.renderFrame();
     }
-    DS.vfx.renderFrame();
   }
 
   function bindInputs() {
@@ -229,6 +239,7 @@
         if (e.code === 'Escape' && state === 'pause') {
           $('pauseScr').classList.add('hidden');
           state = 'playing';
+          lastIdleRender = 0;
         }
         return;
       }
@@ -241,6 +252,7 @@
       if (e.code === 'KeyE' || e.code === 'KeyQ') DS.entities.triggerUltimate(false);
       if (e.code === 'Escape' || e.code === 'KeyP') {
         state = 'pause';
+        lastIdleRender = 0;
         $('pauseScr').classList.remove('hidden');
       }
     });
@@ -343,7 +355,10 @@
       $('codexScr').classList.remove('hidden');
     };
     $('btnCodexHud').onclick = () => {
-      if (state === 'playing') state = 'pause';
+      if (state === 'playing') {
+        state = 'pause';
+        lastIdleRender = 0;
+      }
       DS.ui.renderCodex('skills');
       $('codexScr').classList.remove('hidden');
     };
@@ -371,6 +386,7 @@
     $('qualitySel').onchange = async (e) => {
       const q = e.target.value;
       DS.vfx.applyQuality(q);
+      lastIdleRender = 0;
       profile = await DS.api.saveProfile({ quality: q });
       refreshMenu();
     };
@@ -379,23 +395,27 @@
       const cur = (profile && profile.quality) || 'balanced';
       const next = order[(order.indexOf(cur) + 1) % order.length];
       DS.vfx.applyQuality(next);
+      lastIdleRender = 0;
       profile = await DS.api.saveProfile({ quality: next });
     };
 
     $('btnPause').onclick = () => {
       if (state !== 'playing') return;
       state = 'pause';
+      lastIdleRender = 0;
       $('pauseScr').classList.remove('hidden');
     };
     $('btnResume').onclick = () => {
       $('pauseScr').classList.add('hidden');
       state = 'playing';
+      lastIdleRender = 0;
     };
     $('btnRestartPause').onclick = () => beginPlay();
     $('btnMenuPause').onclick = () => {
       hideAllOverlays();
       $('hud').classList.add('hidden');
       state = 'menu';
+      lastIdleRender = 0;
       refreshMenu();
       $('menuScr').classList.remove('hidden');
     };
@@ -404,6 +424,7 @@
       hideAllOverlays();
       $('hud').classList.add('hidden');
       state = 'menu';
+      lastIdleRender = 0;
       refreshMenu();
       $('menuScr').classList.remove('hidden');
     };
@@ -492,6 +513,13 @@
     },
     getState() {
       const p = DS.entities.player;
+      const stats = DS.vfx.getDrawStats
+        ? DS.vfx.getDrawStats()
+        : {
+            drawCalls: DS.vfx.renderer.info.render.calls,
+            triangles: DS.vfx.renderer.info.render.triangles,
+            textures: DS.vfx.renderer.info.memory.textures
+          };
       return {
         state,
         runTime: Number(runTime.toFixed(2)),
@@ -505,9 +533,9 @@
         quality: profile ? profile.quality : 'balanced',
         arenaLimit: DS.world.ARENA_LIMIT,
         zone: DS.world.getZoneFor(p.x, p.z).id,
-        drawCalls: DS.vfx.renderer.info.render.calls,
-        triangles: DS.vfx.renderer.info.render.triangles,
-        textures: DS.vfx.renderer.info.memory.textures
+        drawCalls: stats.drawCalls,
+        triangles: stats.triangles,
+        textures: stats.textures
       };
     }
   };
@@ -661,6 +689,7 @@
     await nextFrame();
 
     state = 'menu';
+    lastIdleRender = 0;
     refreshMenu();
     $('menuScr').classList.remove('hidden');
     if ($('loadScr')) {

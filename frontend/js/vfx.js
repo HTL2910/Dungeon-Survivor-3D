@@ -5,9 +5,10 @@
   const renderer = new THREE.WebGLRenderer({
     antialias: false,
     powerPreference: 'high-performance',
+    precision: 'mediump',
     stencil: false
   });
-  renderer.setPixelRatio(1.0);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 0.88));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.08;
@@ -18,8 +19,9 @@
   scene.background = new THREE.Color(0x090b14);
   scene.fog = new THREE.FogExp2(0x090b14, 0.0105);
 
-  const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.5, 220);
+  const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.5, 115);
   camera.position.set(0, 21, 18);
+  camera.updateProjectionMatrix();
 
   // Strictly 3 scene lights total (zero shadow maps, zero PointLights, zero scene.environment)
   const ambLight = new THREE.AmbientLight(0x8a9ed0, 1.18);
@@ -108,9 +110,12 @@
   }
   rebuildTargets();
 
+  const DPR_CAPS = { fast: 0.75, balanced: 0.88, high: 1.0 };
   function applyQuality(presetId) {
-    const q = DS.QUALITY_PRESETS[presetId] || DS.QUALITY_PRESETS.balanced;
-    const dpr = Math.min(window.devicePixelRatio || 1, q.dpr);
+    const key = DS.QUALITY_PRESETS[presetId] ? presetId : 'balanced';
+    const q = DS.QUALITY_PRESETS[key];
+    const cap = DPR_CAPS[key] !== undefined ? DPR_CAPS[key] : 0.88;
+    const dpr = Math.min(window.devicePixelRatio || 1, cap);
     renderer.setPixelRatio(dpr);
     renderer.setSize(window.innerWidth, window.innerHeight);
     window.__bloomPass.enabled = q.bloom;
@@ -560,25 +565,29 @@
     return slot;
   }
 
-  // Cool-Blue Fractal 3-Layer Lightning Bolts (24 pooled groups — STRICTLY #ffffff / #7ce0ff / #2b88ff)
+  // Cool-Blue Fractal 3-Layer Lightning Bolts (24 instanced slots — STRICTLY #ffffff / #7ce0ff / #2b88ff)
+  const MAX_BOLTS = 24;
+  const BOLT_SEGS = 5;
   const boltGeo = new THREE.CylinderGeometry(1, 1, 1, 4, 1, true);
   const boltWhiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.98, blending: THREE.AdditiveBlending, depthWrite: false });
   const boltCyanMat = new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.65, blending: THREE.AdditiveBlending, depthWrite: false });
   const boltBlueMat = new THREE.MeshBasicMaterial({ color: 0x3399ff, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false });
+  const _zeroBoltMat = new THREE.Matrix4().makeScale(0, 0, 0);
+  const boltWhiteInst = new THREE.InstancedMesh(boltGeo, boltWhiteMat, MAX_BOLTS * BOLT_SEGS);
+  const boltCyanInst = new THREE.InstancedMesh(boltGeo, boltCyanMat, MAX_BOLTS * BOLT_SEGS);
+  const boltBlueInst = new THREE.InstancedMesh(boltGeo, boltBlueMat, MAX_BOLTS * BOLT_SEGS);
+  for (const inst of [boltWhiteInst, boltCyanInst, boltBlueInst]) {
+    inst.frustumCulled = false;
+    inst.visible = false;
+    inst.matrixAutoUpdate = false;
+    inst.updateMatrix();
+    for (let k = 0; k < MAX_BOLTS * BOLT_SEGS; k++) inst.setMatrixAt(k, _zeroBoltMat);
+    inst.instanceMatrix.needsUpdate = true;
+    scene.add(inst);
+  }
   const BOLT_POOL = [];
-  for (let i = 0; i < 24; i++) {
-    const grp = new THREE.Group();
-    grp.visible = false;
-    const segs = [];
-    for (let s = 0; s < 5; s++) {
-      const mCore = new THREE.Mesh(boltGeo, boltWhiteMat);
-      const mGlow = new THREE.Mesh(boltGeo, boltCyanMat);
-      const mAura = new THREE.Mesh(boltGeo, boltBlueMat);
-      grp.add(mCore, mGlow, mAura);
-      segs.push({ mCore, mGlow, mAura });
-    }
-    scene.add(grp);
-    BOLT_POOL.push({ grp, segs, life: 0, max: 0.2 });
+  for (let i = 0; i < MAX_BOLTS; i++) {
+    BOLT_POOL.push({ idx: i, active: false, life: 0, max: 0.2 });
   }
   let boltCur = 0;
 
@@ -587,39 +596,45 @@
   const _vMid = new THREE.Vector3();
   const _vDir = new THREE.Vector3();
   const _vUp = new THREE.Vector3(0, 1, 0);
+  const _boltQuat = new THREE.Quaternion();
+  const _boltScale = new THREE.Vector3();
+  const _boltMat = new THREE.Matrix4();
+  const _boltPts = Array.from({ length: BOLT_SEGS + 1 }, () => new THREE.Vector3());
 
   function spawnLightning(ax, ay, az, bx, by, bz) {
     const b = BOLT_POOL[boltCur];
     boltCur = (boltCur + 1) % BOLT_POOL.length;
-    const pts = [];
-    for (let i = 0; i <= 5; i++) {
-      const t = i / 5;
-      const jit = i === 0 || i === 5 ? 0 : 0.65;
-      pts.push(
-        new THREE.Vector3(
-          ax + (bx - ax) * t + (Math.random() - 0.5) * jit,
-          ay + (by - ay) * t + (Math.random() - 0.5) * jit * 0.4,
-          az + (bz - az) * t + (Math.random() - 0.5) * jit
-        )
+    for (let i = 0; i <= BOLT_SEGS; i++) {
+      const t = i / BOLT_SEGS;
+      const jit = i === 0 || i === BOLT_SEGS ? 0 : 0.65;
+      _boltPts[i].set(
+        ax + (bx - ax) * t + (Math.random() - 0.5) * jit,
+        ay + (by - ay) * t + (Math.random() - 0.5) * jit * 0.4,
+        az + (bz - az) * t + (Math.random() - 0.5) * jit
       );
     }
-    for (let i = 0; i < 5; i++) {
-      _vA.copy(pts[i]);
-      _vB.copy(pts[i + 1]);
+    const base = b.idx * BOLT_SEGS;
+    for (let i = 0; i < BOLT_SEGS; i++) {
+      _vA.copy(_boltPts[i]);
+      _vB.copy(_boltPts[i + 1]);
       _vMid.addVectors(_vA, _vB).multiplyScalar(0.5);
       _vDir.subVectors(_vB, _vA);
       const len = Math.max(0.05, _vDir.length());
       _vDir.normalize();
-      const { mCore, mGlow, mAura } = b.segs[i];
-      for (const [m, rad] of [[mCore, 0.05], [mGlow, 0.14], [mAura, 0.28]]) {
-        m.position.copy(_vMid);
-        m.quaternion.setFromUnitVectors(_vUp, _vDir);
-        m.scale.set(rad, len * 1.05, rad);
-      }
+      _boltQuat.setFromUnitVectors(_vUp, _vDir);
+      const h = len * 1.05;
+      const slot = base + i;
+      boltWhiteInst.setMatrixAt(slot, _boltMat.compose(_vMid, _boltQuat, _boltScale.set(0.05, h, 0.05)));
+      boltCyanInst.setMatrixAt(slot, _boltMat.compose(_vMid, _boltQuat, _boltScale.set(0.14, h, 0.14)));
+      boltBlueInst.setMatrixAt(slot, _boltMat.compose(_vMid, _boltQuat, _boltScale.set(0.28, h, 0.28)));
     }
+    b.active = true;
     b.life = 0.2;
     b.max = 0.2;
-    b.grp.visible = true;
+    for (const inst of [boltWhiteInst, boltCyanInst, boltBlueInst]) {
+      inst.visible = true;
+      inst.instanceMatrix.needsUpdate = true;
+    }
     spawnFloorGlow(bx, bz, 0x3399ff, 3.0, 0.28, 0.78);
     spawnRing(bx, bz, 0x66ccff, 2.4, 0.24, false);
     for (let k = 0; k < 6; k++) {
@@ -631,38 +646,75 @@
     }
   }
 
-  // Persistent Dungeon Torch Flame Sprites + Glow Discs (zero PointLights)
+  // Persistent Dungeon Torch Flame Sprites + Glow Discs (instanced, zero PointLights)
+  const MAX_TORCH_VFX = 32;
   const torchFlames = [];
-  function addTorchEffect(x, y, z) {
-    const sp = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.1, 1.3),
-      new THREE.MeshBasicMaterial({
-        map: TEX.glow,
-        color: 0xffaa44,
-        transparent: true,
-        opacity: 0.9,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-      })
-    );
-    sp.position.set(x, y + 0.35, z);
-    scene.add(sp);
-    torchFlames.push(sp);
+  const torchFlameGeo = new THREE.PlaneGeometry(1.1, 1.3);
+  const torchFlameMat = new THREE.MeshBasicMaterial({
+    map: TEX.glow,
+    color: 0xffaa44,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
+  const torchFlameInst = new THREE.InstancedMesh(torchFlameGeo, torchFlameMat, MAX_TORCH_VFX);
+  torchFlameInst.count = 0;
+  torchFlameInst.visible = false;
+  torchFlameInst.frustumCulled = false;
+  torchFlameInst.matrixAutoUpdate = false;
+  torchFlameInst.updateMatrix();
+  scene.add(torchFlameInst);
 
-    const disc = new THREE.Mesh(
-      floorDiscGeo,
-      new THREE.MeshBasicMaterial({
-        map: TEX.glow,
-        color: 0xff8a30,
-        transparent: true,
-        opacity: 0.42,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-      })
-    );
-    disc.position.set(x, 0.035, z);
-    disc.scale.set(10, 1, 10);
-    scene.add(disc);
+  const torchDiscMat = new THREE.MeshBasicMaterial({
+    map: TEX.glow,
+    color: 0xff8a30,
+    transparent: true,
+    opacity: 0.42,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
+  const torchDiscInst = new THREE.InstancedMesh(floorDiscGeo, torchDiscMat, MAX_TORCH_VFX);
+  torchDiscInst.count = 0;
+  torchDiscInst.visible = false;
+  torchDiscInst.frustumCulled = false;
+  torchDiscInst.matrixAutoUpdate = false;
+  torchDiscInst.updateMatrix();
+  scene.add(torchDiscInst);
+
+  const _torchPos = new THREE.Vector3();
+  const _torchScale = new THREE.Vector3();
+  const _torchIdentQuat = new THREE.Quaternion();
+  const _torchMat = new THREE.Matrix4();
+
+  function clearTorchEffects() {
+    torchFlames.length = 0;
+    torchFlameInst.count = 0;
+    torchFlameInst.visible = false;
+    torchDiscInst.count = 0;
+    torchDiscInst.visible = false;
+  }
+
+  function addTorchEffect(x, y, z) {
+    const idx = torchFlames.length;
+    if (idx >= MAX_TORCH_VFX) return;
+    torchFlames.push({ x, y: y + 0.35, z });
+
+    _torchPos.set(x, y + 0.35, z);
+    _torchScale.set(1, 1.15, 1);
+    _torchMat.compose(_torchPos, camera.quaternion, _torchScale);
+    torchFlameInst.setMatrixAt(idx, _torchMat);
+    torchFlameInst.count = torchFlames.length;
+    torchFlameInst.visible = true;
+    torchFlameInst.instanceMatrix.needsUpdate = true;
+
+    _torchPos.set(x, 0.035, z);
+    _torchScale.set(10, 1, 10);
+    _torchMat.compose(_torchPos, _torchIdentQuat, _torchScale);
+    torchDiscInst.setMatrixAt(idx, _torchMat);
+    torchDiscInst.count = torchFlames.length;
+    torchDiscInst.visible = true;
+    torchDiscInst.instanceMatrix.needsUpdate = true;
   }
 
   let shakeAmt = 0;
@@ -709,10 +761,30 @@
         s.mesh.material.opacity = (s.life / s.max) * 0.95;
       }
     }
-    for (const b of BOLT_POOL) {
-      if (!b.grp.visible) continue;
+    let anyBoltActive = false;
+    let boltExpired = false;
+    for (let bi = 0; bi < BOLT_POOL.length; bi++) {
+      const b = BOLT_POOL[bi];
+      if (!b.active) continue;
       b.life -= dt;
-      if (b.life <= 0) b.grp.visible = false;
+      if (b.life <= 0) {
+        b.active = false;
+        boltExpired = true;
+        const base = b.idx * BOLT_SEGS;
+        for (let s = 0; s < BOLT_SEGS; s++) {
+          boltWhiteInst.setMatrixAt(base + s, _zeroBoltMat);
+          boltCyanInst.setMatrixAt(base + s, _zeroBoltMat);
+          boltBlueInst.setMatrixAt(base + s, _zeroBoltMat);
+        }
+      } else {
+        anyBoltActive = true;
+      }
+    }
+    if (boltExpired) {
+      for (const inst of [boltWhiteInst, boltCyanInst, boltBlueInst]) {
+        inst.visible = anyBoltActive;
+        inst.instanceMatrix.needsUpdate = true;
+      }
     }
     for (const t of telegraphPool) {
       if (!t.active) continue;
@@ -731,12 +803,6 @@
         if (cb) cb(t.x, t.z, t.radius);
       }
     }
-    for (let i = 0; i < torchFlames.length; i++) {
-      const f = torchFlames[i];
-      f.quaternion.copy(camera.quaternion);
-      const s = 0.88 + Math.sin(now * 9 + i) * 0.16;
-      f.scale.set(s, s * 1.15, 1);
-    }
 
     // Smooth Isometric Camera + Shake
     const tx = playerX;
@@ -750,18 +816,37 @@
       shakeAmt *= Math.pow(0.05, dt);
     }
     camera.lookAt(playerX, 0.8, playerZ);
+
+    if (torchFlames.length > 0) {
+      for (let i = 0; i < torchFlames.length; i++) {
+        const f = torchFlames[i];
+        const s = 0.88 + Math.sin(now * 9 + i) * 0.16;
+        _torchPos.set(f.x, f.y, f.z);
+        _torchScale.set(s, s * 1.15, 1);
+        _torchMat.compose(_torchPos, camera.quaternion, _torchScale);
+        torchFlameInst.setMatrixAt(i, _torchMat);
+      }
+      torchFlameInst.instanceMatrix.needsUpdate = true;
+    }
   }
+
+  let lastSceneCalls = 0;
+  let lastSceneTris = 0;
 
   function renderFrame() {
     const bp = window.__bloomPass;
     if (!bp.enabled) {
       renderer.setRenderTarget(null);
       renderer.render(scene, camera);
+      lastSceneCalls = renderer.info.render.calls;
+      lastSceneTris = renderer.info.render.triangles;
       return;
     }
     renderer.setRenderTarget(rtScene);
     renderer.clear();
     renderer.render(scene, camera);
+    lastSceneCalls = renderer.info.render.calls;
+    lastSceneTris = renderer.info.render.triangles;
 
     extractMat.uniforms.tDiffuse.value = rtScene.texture;
     extractMat.uniforms.uThresh.value = bp.threshold;
@@ -808,9 +893,15 @@
     spawnTelegraph,
     telegraphs: telegraphPool,
     addTorchEffect,
+    clearTorchEffects,
     addShake,
     update: updateVfx,
     renderFrame,
+    getDrawStats: () => ({
+      drawCalls: lastSceneCalls,
+      triangles: lastSceneTris,
+      textures: renderer.info.memory.textures
+    }),
     clearAll() {
       fireBatch.clear();
       iceBatch.clear();
@@ -821,7 +912,15 @@
       for (const d of decalPool) d.mesh.visible = false;
       for (const r of ringPool) r.mesh.visible = false;
       for (const s of slashPool) s.mesh.visible = false;
-      for (const b of BOLT_POOL) b.grp.visible = false;
+      for (let bi = 0; bi < BOLT_POOL.length; bi++) {
+        BOLT_POOL[bi].active = false;
+        BOLT_POOL[bi].life = 0;
+      }
+      for (const inst of [boltWhiteInst, boltCyanInst, boltBlueInst]) {
+        for (let k = 0; k < MAX_BOLTS * BOLT_SEGS; k++) inst.setMatrixAt(k, _zeroBoltMat);
+        inst.instanceMatrix.needsUpdate = true;
+        inst.visible = false;
+      }
       for (const t of telegraphPool) {
         t.active = false;
         t.grp.visible = false;

@@ -172,11 +172,124 @@
     return { group: wrap, inner: clone, clips: t.clips };
   }
 
+  const _instPos = new THREE.Vector3();
+  const _instQuat = new THREE.Quaternion();
+  const _instEuler = new THREE.Euler();
+  const _instScale = new THREE.Vector3();
+  const _instFinalMat = new THREE.Matrix4();
+  const _identQuat = new THREE.Quaternion();
+  const _zeroMat4 = new THREE.Matrix4().makeScale(0, 0, 0);
+  const FALLBACK_BOX_GEO = new THREE.BoxGeometry(0.8, 1.0, 0.8);
+  const FALLBACK_BOX_MAT = new THREE.MeshLambertMaterial({ color: 0x55aaff });
+
+  function _composePlacementWrap(p, outMat) {
+    _instPos.set(p.x || 0, p.y || 0, p.z || 0);
+    _instEuler.set(p.rx || 0, p.ry || 0, p.rz || 0);
+    _instQuat.setFromEuler(_instEuler);
+    _instScale.set(
+      p.sx !== undefined ? p.sx : 1,
+      p.sy !== undefined ? p.sy : 1,
+      p.sz !== undefined ? p.sz : 1
+    );
+    return outMat.compose(_instPos, _instQuat, _instScale);
+  }
+
+  function _buildInstancedModels(cat, key, placements) {
+    if (!placements || !placements.length) {
+      return { meshes: [], wrapMatrices: [], setInstanceMatrix() {} };
+    }
+    const t = templates[cat] && templates[cat][key];
+    const subMeshes = [];
+    if (t && t.root) {
+      t.root.updateMatrixWorld(true);
+      const invRoot = new THREE.Matrix4().copy(t.root.matrixWorld).invert();
+      t.root.traverse((o) => {
+        if (!o.isMesh && !o.isSkinnedMesh) return;
+        const localMat = new THREE.Matrix4().multiplyMatrices(invRoot, o.matrixWorld);
+        subMeshes.push({
+          geometry: o.geometry,
+          material: o.material,
+          localMat
+        });
+      });
+    }
+
+    const isFallback = subMeshes.length === 0;
+    if (isFallback) {
+      subMeshes.push({
+        geometry: FALLBACK_BOX_GEO,
+        material: FALLBACK_BOX_MAT,
+        localMat: new THREE.Matrix4()
+      });
+    }
+
+    const count = placements.length;
+    const wrapMatrices = new Array(count);
+    const baseMatrices = new Array(count);
+    for (let i = 0; i < count; i++) {
+      const p = placements[i];
+      wrapMatrices[i] = _composePlacementWrap(p, new THREE.Matrix4());
+      const baseMat = new THREE.Matrix4();
+      if (isFallback) {
+        const dh = p.desiredHeight || 1.4;
+        _instPos.set(0, dh * 0.5, 0);
+        _instScale.set(1, dh, 1);
+        baseMat.compose(_instPos, _identQuat, _instScale);
+      } else {
+        const s = (p.desiredHeight || 1.8) * (p.fitByMaxDim ? t.unitScale : t.heightScale);
+        _instPos.set(-t.center.x * s, -t.minY * s, -t.center.z * s);
+        _instScale.set(s, s, s);
+        baseMat.compose(_instPos, _identQuat, _instScale);
+      }
+      baseMatrices[i] = baseMat;
+    }
+
+    const meshes = [];
+    for (let sIdx = 0; sIdx < subMeshes.length; sIdx++) {
+      const sub = subMeshes[sIdx];
+      const inst = new THREE.InstancedMesh(sub.geometry, sub.material, count);
+      for (let i = 0; i < count; i++) {
+        _instFinalMat.multiplyMatrices(wrapMatrices[i], baseMatrices[i]);
+        if (!isFallback) _instFinalMat.multiply(sub.localMat);
+        inst.setMatrixAt(i, _instFinalMat);
+      }
+      inst.instanceMatrix.needsUpdate = true;
+      inst.matrixAutoUpdate = false;
+      inst.updateMatrix();
+      if (typeof inst.computeBoundingSphere === 'function') inst.computeBoundingSphere();
+      // Keep full-arena static instanced layers from disappearing on bounds/frustum edge cases
+      inst.frustumCulled = false;
+      meshes.push(inst);
+    }
+
+    function setInstanceMatrix(i, mat4) {
+      if (i < 0 || i >= count) return;
+      for (let sIdx = 0; sIdx < meshes.length; sIdx++) {
+        const inst = meshes[sIdx];
+        const sub = subMeshes[sIdx];
+        _instFinalMat.multiplyMatrices(mat4, baseMatrices[i]);
+        if (!isFallback) _instFinalMat.multiply(sub.localMat);
+        inst.setMatrixAt(i, _instFinalMat);
+        inst.instanceMatrix.needsUpdate = true;
+      }
+    }
+
+    return { meshes, wrapMatrices, setInstanceMatrix };
+  }
+
   const arenaGroup = new THREE.Group();
   const breakables = [];
   const loreNodes = [];
   const shrines = [];
   const ARENA_LIMIT = 98;
+
+  // Shared Lore Scroll Geometries & Static Materials (per-orb material stays unique for discovered color)
+  const lorePedGeo = new THREE.CylinderGeometry(0.55, 0.72, 0.5, 8);
+  const loreOrbGeo = new THREE.OctahedronGeometry(0.45, 0);
+  const loreRingGeo = new THREE.RingGeometry(0.9, 1.15, 24);
+  loreRingGeo.rotateX(-Math.PI / 2);
+  const LORE_PED_MAT = new THREE.MeshLambertMaterial({ color: 0x2c324a });
+  const LORE_RING_MAT = new THREE.MeshBasicMaterial({ color: 0xb866ff, transparent: true, opacity: 0.75, side: THREE.DoubleSide });
 
   // Shared Shrine Geometries & Materials (zero per-instance cloning, zero PointLights)
   const SHRINE_STONE_MAT = new THREE.MeshLambertMaterial({ color: 0x3b445e });
@@ -216,6 +329,7 @@
   function buildArena() {
     const scene = DS.vfx.scene;
     while (arenaGroup.children.length) arenaGroup.remove(arenaGroup.children[0]);
+    if (DS.vfx.clearTorchEffects) DS.vfx.clearTorchEffects();
     breakables.length = 0;
     loreNodes.length = 0;
     shrines.length = 0;
@@ -255,21 +369,50 @@
     dragonAltarRing.position.set(0, 0.03, -76);
     staticGroup.add(dragonAltarRing);
 
-    // Perimeter Fortress Walls around +/-102 (4 Monumental Gates + Wall Segments)
-    const wallPositions = [];
+    // Perimeter Fortress Walls around +/-102 (4 Monumental Gates + 48 Wall Segments) + 6 Interior Ruins
+    const wallPlacements = [];
+    const doorPlacements = [];
     for (let i = -96; i <= 96; i += 16) {
-      wallPositions.push({ x: i, z: -102, ry: 0, door: i === 0 });
-      wallPositions.push({ x: i, z: 102, ry: Math.PI, door: i === 0 });
-      wallPositions.push({ x: -102, z: i, ry: Math.PI / 2, door: i === 0 });
-      wallPositions.push({ x: 102, z: i, ry: -Math.PI / 2, door: i === 0 });
+      for (const w of [
+        { x: i, z: -102, ry: 0, door: i === 0 },
+        { x: i, z: 102, ry: Math.PI, door: i === 0 },
+        { x: -102, z: i, ry: Math.PI / 2, door: i === 0 },
+        { x: 102, z: i, ry: -Math.PI / 2, door: i === 0 }
+      ]) {
+        if (w.door) {
+          doorPlacements.push({
+            x: w.x, y: 0, z: w.z, ry: w.ry,
+            sx: 2.6, sy: 1.55, sz: 1.5,
+            desiredHeight: 7.2, fitByMaxDim: true
+          });
+        } else {
+          wallPlacements.push({
+            x: w.x, y: 0, z: w.z, ry: w.ry,
+            sx: 2.6, sy: 1.55, sz: 1.5,
+            desiredHeight: 5.6, fitByMaxDim: true
+          });
+        }
+      }
     }
-    for (const w of wallPositions) {
-      const m = spawnModel('dungeon', w.door ? 'wallDoor' : 'wall', w.door ? 7.2 : 5.6, true);
-      m.group.position.set(w.x, 0, w.z);
-      m.group.rotation.y = w.ry;
-      m.group.scale.set(2.6, 1.55, 1.5);
-      staticGroup.add(m.group);
+
+    const interiorRuins = [
+      // South Sunken Crypt barricades
+      [-18, 62, 0.25], [18, 62, -0.25], [0, 82, 0],
+      // East Relic Vault courtyard dividers
+      [68, -22, Math.PI / 2], [68, 22, Math.PI / 2],
+      // West Fog Cloister wings
+      [-78, 0, Math.PI / 2]
+    ];
+    for (const [rx, rz, rry] of interiorRuins) {
+      wallPlacements.push({
+        x: rx, y: 0, z: rz, ry: rry,
+        sx: 1.4, sy: 1.0, sz: 1.1,
+        desiredHeight: 3.4, fitByMaxDim: true
+      });
     }
+
+    for (const m of _buildInstancedModels('dungeon', 'wall', wallPlacements).meshes) staticGroup.add(m);
+    for (const m of _buildInstancedModels('dungeon', 'wallDoor', doorPlacements).meshes) staticGroup.add(m);
 
     // 20 Pillars + Torches spanning Center Sanctum & All 4 Outer Districts (ZERO PointLights)
     const pillarCoords = [
@@ -284,18 +427,18 @@
       // West Fog Cloister
       [-64, -14], [-64, 14]
     ];
+    const pillarPlacements = [];
+    const torchPlacements = [];
     for (const [px, pz] of pillarCoords) {
-      const p = spawnModel('dungeon', 'pillar', 4.8, false);
-      p.group.position.set(px, 0, pz);
-      staticGroup.add(p.group);
-
-      const t = spawnModel('dungeon', 'torch', 1.6, false);
-      t.group.position.set(px, 2.4, pz + 0.72);
-      staticGroup.add(t.group);
+      pillarPlacements.push({ x: px, y: 0, z: pz, desiredHeight: 4.8, fitByMaxDim: false });
+      torchPlacements.push({ x: px, y: 2.4, z: pz + 0.72, desiredHeight: 1.6, fitByMaxDim: false });
       DS.vfx.addTorchEffect(px, 3.85, pz + 0.72);
     }
+    for (const m of _buildInstancedModels('dungeon', 'pillar', pillarPlacements).meshes) staticGroup.add(m);
+    for (const m of _buildInstancedModels('dungeon', 'torch', torchPlacements).meshes) staticGroup.add(m);
 
     // Cardinal Cobblestone Causeways stretching across N/S/E/W wings
+    const pathPlacements = [];
     for (const dist of [14, 32, 50, 68, 84]) {
       for (const [sx, sz, ry] of [
         [0, -dist, 0],
@@ -303,46 +446,28 @@
         [-dist, 0, Math.PI / 2],
         [dist, 0, -Math.PI / 2]
       ]) {
-        const p = spawnModel('dungeon', 'path', 0.45, true);
-        p.group.position.set(sx, 0.02, sz);
-        p.group.rotation.y = ry;
-        p.group.scale.set(3.4, 0.5, 3.4);
-        staticGroup.add(p.group);
+        pathPlacements.push({
+          x: sx, y: 0.02, z: sz, ry,
+          sx: 3.4, sy: 0.5, sz: 3.4,
+          desiredHeight: 0.45, fitByMaxDim: true
+        });
       }
     }
+    for (const m of _buildInstancedModels('dungeon', 'path', pathPlacements).meshes) staticGroup.add(m);
 
-    // North Altar Grand Stairs + Ruin Walls in South Crypt / East Vault / West Cloister
+    // North Altar Grand Stairs (single mesh)
     const stairsObj = spawnModel('dungeon', 'stairs', 2.8, true);
     stairsObj.group.position.set(0, 0, -95);
     stairsObj.group.scale.set(2.8, 2.2, 2.2);
     staticGroup.add(stairsObj.group);
 
-    const interiorRuins = [
-      // South Sunken Crypt barricades
-      [-18, 62, 0.25], [18, 62, -0.25], [0, 82, 0],
-      // East Relic Vault courtyard dividers
-      [68, -22, Math.PI / 2], [68, 22, Math.PI / 2],
-      // West Fog Cloister wings
-      [-78, 0, Math.PI / 2]
-    ];
-    for (const [rx, rz, rry] of interiorRuins) {
-      const rw = spawnModel('dungeon', 'wall', 3.4, true);
-      rw.group.position.set(rx, 0, rz);
-      rw.group.rotation.y = rry;
-      rw.group.scale.set(1.4, 1.0, 1.1);
-      staticGroup.add(rw.group);
-    }
-
     // Rock clusters across all 5 districts
-    for (const [rx, rz] of [
+    const rockPlacements = [
       [-34, -34], [34, -34], [-34, 34], [34, 34],
       [-76, -72], [76, -72], [-76, 72], [76, 72],
       [-52, 66], [52, 66], [-82, -28], [84, 34]
-    ]) {
-      const rk = spawnModel('dungeon', 'rock', 2.6, true);
-      rk.group.position.set(rx, 0, rz);
-      staticGroup.add(rk.group);
-    }
+    ].map(([rx, rz]) => ({ x: rx, y: 0, z: rz, desiredHeight: 2.6, fitByMaxDim: true }));
+    for (const m of _buildInstancedModels('dungeon', 'rock', rockPlacements).meshes) staticGroup.add(m);
 
     // Freeze static world matrices once for 60-FPS CPU efficiency
     staticGroup.traverse((o) => {
@@ -351,7 +476,7 @@
     });
     arenaGroup.add(staticGroup);
 
-    // Expanded Breakable Barrels, Crates & 10 Treasure Chests
+    // Expanded Breakable Barrels, Crates & 10 Treasure Chests (instanced per kind with visible proxy)
     const propCoords = [
       // Center Sanctum
       [-9, -9, 'barrel'], [9, -9, 'crate'], [-9, 9, 'crate'], [9, 9, 'barrel'],
@@ -370,22 +495,47 @@
       [-74, 0, 'chest'], [-78, 18, 'chest'],
       [-54, -12, 'barrel'], [-54, 12, 'crate'], [-72, -18, 'barrel'], [-72, 18, 'crate'], [-86, 12, 'barrel']
     ];
+    const breakablesByKind = { barrel: [], crate: [], chest: [] };
     for (const [bx, bz, kind] of propCoords) {
-      const obj = spawnModel('dungeon', kind, kind === 'chest' ? 1.55 : 1.35, true);
-      obj.group.position.set(bx, 0, bz);
-      arenaGroup.add(obj.group);
-      breakables.push({
-        kind,
-        x: bx,
-        z: bz,
-        radius: 1.15,
-        hp: kind === 'chest' ? 40 : 20,
-        maxHp: kind === 'chest' ? 40 : 20,
-        isChest: kind === 'chest',
-        group: obj.group,
-        alive: true,
-        respawnT: 0
-      });
+      breakablesByKind[kind].push({ bx, bz, kind });
+    }
+    for (const kind of ['barrel', 'crate', 'chest']) {
+      const items = breakablesByKind[kind];
+      if (!items.length) continue;
+      const dh = kind === 'chest' ? 1.55 : 1.35;
+      const placements = items.map((it) => ({
+        x: it.bx, y: 0, z: it.bz, desiredHeight: dh, fitByMaxDim: true
+      }));
+      const batch = _buildInstancedModels('dungeon', kind, placements);
+      for (const m of batch.meshes) arenaGroup.add(m);
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        const origMat4 = batch.wrapMatrices[i];
+        let _vis = true;
+        const groupProxy = {
+          get visible() {
+            return _vis;
+          },
+          set visible(v) {
+            const next = !!v;
+            if (_vis === next) return;
+            _vis = next;
+            batch.setInstanceMatrix(i, next ? origMat4 : _zeroMat4);
+          }
+        };
+        breakables.push({
+          kind,
+          x: it.bx,
+          z: it.bz,
+          radius: 1.15,
+          hp: kind === 'chest' ? 40 : 20,
+          maxHp: kind === 'chest' ? 40 : 20,
+          isChest: kind === 'chest',
+          group: groupProxy,
+          alive: true,
+          respawnT: 0
+        });
+      }
     }
 
     buildLoreScrolls();
@@ -449,25 +599,18 @@
       const wrap = new THREE.Group();
       wrap.position.set(sDef.x, 0, sDef.z);
 
-      const pedestal = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.55, 0.72, 0.5, 8),
-        new THREE.MeshLambertMaterial({ color: 0x2c324a })
-      );
+      const pedestal = new THREE.Mesh(lorePedGeo, LORE_PED_MAT);
       pedestal.position.y = 0.25;
       wrap.add(pedestal);
 
       const scrollOrb = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.45, 0),
+        loreOrbGeo,
         new THREE.MeshBasicMaterial({ color: 0xd088ff })
       );
       scrollOrb.position.y = 1.25;
       wrap.add(scrollOrb);
 
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(0.9, 1.15, 24),
-        new THREE.MeshBasicMaterial({ color: 0xb866ff, transparent: true, opacity: 0.75, side: THREE.DoubleSide })
-      );
-      ring.rotation.x = -Math.PI / 2;
+      const ring = new THREE.Mesh(loreRingGeo, LORE_RING_MAT);
       ring.position.y = 0.04;
       wrap.add(ring);
 
