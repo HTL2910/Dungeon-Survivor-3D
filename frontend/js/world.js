@@ -15,11 +15,19 @@
   const loader = new LoaderCtor();
   if (window.MeshoptDecoder && loader.setMeshoptDecoder) loader.setMeshoptDecoder(window.MeshoptDecoder);
 
+  function _disposeUnusedPbrMaps(m, keepMap, keepEmissive) {
+    for (const t of [m.normalMap, m.roughnessMap, m.metalnessMap, m.aoMap]) {
+      if (t && t !== keepMap && t !== keepEmissive && typeof t.dispose === 'function') {
+        try { t.dispose(); } catch {}
+      }
+    }
+  }
+
   function toFastLambert(root) {
     let meshes = 0;
     let texOk = true;
     root.traverse((o) => {
-      if (!o.isMesh) return;
+      if (!o.isMesh && !o.isSkinnedMesh) return;
       meshes++;
       const src = Array.isArray(o.material) ? o.material : [o.material];
       const out = src.map((m) => {
@@ -37,11 +45,13 @@
           alphaTest: m.alphaTest || 0,
           side: m.side !== undefined ? m.side : THREE.FrontSide
         });
+        _disposeUnusedPbrMaps(m, m.map || null, m.emissiveMap || null);
         if (m.dispose && m !== lm) m.dispose();
         return lm;
       });
       o.material = Array.isArray(o.material) ? out : out[0];
       o._origMat = o.material;
+      o.frustumCulled = !o.isSkinnedMesh;
       o.castShadow = false;
       o.receiveShadow = false;
     });
@@ -74,32 +84,40 @@
 
   async function loadAllAssets(onProgress) {
     let loadedCount = 0;
-    const tasks = [];
+    const jobs = [];
     for (const cat of Object.keys(DS.ASSETS)) {
       for (const [key, url] of DS.ASSETS[cat]) {
-        tasks.push(
-          new Promise((resolve) => {
-            loader.load(
-              url,
-              (gltf) => {
-                prepTemplate(cat, key, gltf);
-                loadedCount++;
-                if (onProgress) onProgress(loadedCount, expectedTotal);
-                resolve();
-              },
-              undefined,
-              () => {
-                texStatus[cat][key] = false;
-                loadedCount++;
-                if (onProgress) onProgress(loadedCount, expectedTotal);
-                resolve();
-              }
-            );
-          })
-        );
+        jobs.push({ cat, key, url });
       }
     }
-    await Promise.all(tasks);
+    let nextIdx = 0;
+    const MAX_CONCURRENT = 6;
+    async function worker() {
+      while (nextIdx < jobs.length) {
+        const job = jobs[nextIdx++];
+        await new Promise((resolve) => {
+          loader.load(
+            job.url,
+            (gltf) => {
+              prepTemplate(job.cat, job.key, gltf);
+              loadedCount++;
+              if (onProgress) onProgress(loadedCount, expectedTotal);
+              resolve();
+            },
+            undefined,
+            () => {
+              texStatus[job.cat][job.key] = false;
+              loadedCount++;
+              if (onProgress) onProgress(loadedCount, expectedTotal);
+              resolve();
+            }
+          );
+        });
+      }
+    }
+    const pool = [];
+    for (let i = 0; i < Math.min(MAX_CONCURRENT, jobs.length); i++) pool.push(worker());
+    await Promise.all(pool);
   }
 
   window.__dsTexOk = function () {

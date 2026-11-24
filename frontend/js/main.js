@@ -504,28 +504,172 @@
         scrolls: collectedScrollsRun.size,
         quality: profile ? profile.quality : 'balanced',
         arenaLimit: DS.world.ARENA_LIMIT,
-        zone: DS.world.getZoneFor(p.x, p.z).id
+        zone: DS.world.getZoneFor(p.x, p.z).id,
+        drawCalls: DS.vfx.renderer.info.render.calls,
+        triangles: DS.vfx.renderer.info.render.triangles,
+        textures: DS.vfx.renderer.info.memory.textures
       };
     }
   };
 
+  const DS_LOAD_TIPS = [
+    '💡 Thu thập 5 Cổ Thư khắp 5 khu vực để giải mã bí mật Cổ Thành Lạc Long.',
+    '💡 Combo đòn 3 đạt sát thương và phạm vi cực đại — giữ nhịp tấn công để cộng dồn Fury.',
+    '💡 Chiếm Đền Thờ (Shrine) ở các vùng ngoại vi để nhận bùa tăng tốc, hút máu hoặc cuồng nộ.'
+  ];
+
+  function setLoadUI(pct, txt) {
+    const p = Math.max(0, Math.min(100, Math.round(pct || 0)));
+    if ($('loadBarFill')) $('loadBarFill').style.width = `${p}%`;
+    if ($('loadPct')) $('loadPct').textContent = `${p}%`;
+    if ($('loadTxt') && txt) $('loadTxt').textContent = txt;
+    if ($('loadTip')) {
+      const idx = Math.min(DS_LOAD_TIPS.length - 1, Math.floor(p / 35));
+      if ($('loadTip').textContent !== DS_LOAD_TIPS[idx]) $('loadTip').textContent = DS_LOAD_TIPS[idx];
+    }
+  }
+
+  function nextFrame() {
+    return new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+
+  async function warmupDungeonGPU() {
+    const r = DS.vfx.renderer;
+    const sc = DS.vfx.scene;
+    const cam = DS.vfx.camera;
+    const seen = new Set();
+    const texQueue = [];
+    const queueTex = (tex) => {
+      if (tex && tex.isTexture && !seen.has(tex)) {
+        if (!tex.image || tex.image.width !== 0) {
+          seen.add(tex);
+          texQueue.push(tex);
+        }
+      }
+    };
+    const queueMatTex = (mat) => {
+      if (!mat) return;
+      const arr = Array.isArray(mat) ? mat : [mat];
+      for (const m of arr) {
+        if (!m) continue;
+        queueTex(m.map);
+        queueTex(m.emissiveMap);
+      }
+    };
+
+    try {
+      if (DS.vfx.TEX) {
+        for (const tk of Object.keys(DS.vfx.TEX)) queueTex(DS.vfx.TEX[tk]);
+      }
+      const cats = Object.keys(DS.world.templates || {});
+      for (const cat of cats) {
+        const bucket = DS.world.templates[cat] || {};
+        for (const key of Object.keys(bucket)) {
+          const tpl = bucket[key];
+          if (!tpl || !tpl.root) continue;
+          tpl.root.traverse((o) => {
+            if (o.isMesh || o.isSkinnedMesh) queueMatTex(o.material);
+          });
+        }
+      }
+    } catch {}
+
+    let cur = 0;
+    while (cur < texQueue.length) {
+      const end = Math.min(texQueue.length, cur + 8);
+      if (typeof r.initTexture === 'function') {
+        for (; cur < end; cur++) {
+          try { r.initTexture(texQueue[cur]); } catch {}
+        }
+      } else {
+        cur = texQueue.length;
+      }
+      const pct = 88 + Math.round((cur / Math.max(1, texQueue.length)) * 6);
+      setLoadUI(Math.min(94, pct), `Đang nạp kết cấu GPU (${cur}/${texQueue.length})...`);
+      await nextFrame();
+    }
+
+    setLoadUI(97, 'Đang biên dịch shader GPU...');
+    await nextFrame();
+
+    const warmupGroup = new THREE.Group();
+    const wrapped = [];
+    const savedCull = [];
+    const prevPos = cam.position.clone();
+    const prevRot = cam.rotation.clone();
+    try {
+      cam.position.set(0, 21, 18);
+      cam.lookAt(0, 0.8, 0);
+      cam.updateMatrixWorld(true);
+
+      // 1 representative per category shares the same Lambert shader program
+      for (const cat of ['characters', 'monsters', 'weapons']) {
+        const bucket = (DS.world.templates && DS.world.templates[cat]) || {};
+        const firstKey = Object.keys(bucket)[0];
+        const tpl = firstKey ? bucket[firstKey] : null;
+        if (!tpl || !tpl.root) continue;
+        tpl.root.traverse((o) => {
+          if (o.isMesh || o.isSkinnedMesh) {
+            savedCull.push([o, o.frustumCulled]);
+            o.frustumCulled = false;
+          }
+        });
+        const w = new THREE.Group();
+        w.add(tpl.root);
+        warmupGroup.add(w);
+        wrapped.push([w, tpl.root]);
+      }
+
+      sc.add(warmupGroup);
+      r.compile(sc, cam);
+      DS.vfx.renderFrame();
+    } catch {} finally {
+      for (const [w, root] of wrapped) w.remove(root);
+      for (const [obj, prev] of savedCull) obj.frustumCulled = prev;
+      sc.remove(warmupGroup);
+      cam.position.copy(prevPos);
+      cam.rotation.copy(prevRot);
+      cam.updateMatrixWorld(true);
+    }
+  }
+
   async function boot() {
     bindInputs();
+    setLoadUI(2, 'Đang nạp tài nguyên 3D... 0/41');
     const [loadedProfile, loadedLb] = await Promise.all([
       DS.api.loadProfile(),
       DS.api.getLeaderboard(),
       DS.world.loadAllAssets((cur, tot) => {
-        if ($('loadTxt')) $('loadTxt').textContent = `Đang nạp tài nguyên 3D... ${cur}/${tot}`;
+        const pct = Math.min(80, Math.round((cur / Math.max(1, tot)) * 80));
+        setLoadUI(pct, `Đang nạp tài nguyên 3D... ${cur}/${tot}`);
       })
     ]);
     profile = loadedProfile;
     leaderboard = loadedLb;
     DS.vfx.applyQuality(profile.quality || 'balanced');
+
+    setLoadUI(85, 'Đang dựng Cổ Thành 5 Khu Vực...');
+    await nextFrame();
     DS.world.buildArena();
-    if ($('loadScr')) $('loadScr').classList.add('hidden');
+
+    setLoadUI(88, 'Đang nạp kết cấu GPU...');
+    await nextFrame();
+    await warmupDungeonGPU();
+
+    setLoadUI(100, 'Hoàn tất! Sẵn sàng nhập trận.');
+    window.__dsLoadDone = true;
+    await nextFrame();
+
     state = 'menu';
     refreshMenu();
     $('menuScr').classList.remove('hidden');
+    if ($('loadScr')) {
+      $('loadScr').classList.add('fadeOut');
+      setTimeout(() => {
+        $('loadScr').classList.add('hidden');
+        $('loadScr').classList.remove('fadeOut');
+      }, 240);
+    }
     requestAnimationFrame(animate);
   }
 
